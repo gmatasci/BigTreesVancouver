@@ -1,3 +1,8 @@
+## Add LAStools bin directory to the system PATH environment variable by:
+# "Edit the system environment variables" --> "Environment variables"
+# --> select variable "PATH" in "User variables for gmatasci" --> "Edit..."
+# --> paste "C:\LAStools\bin" after a ";" without any space
+
 import arcpy
 import numpy as np
 import os

@@ -1,37 +1,37 @@
 """
 Project Name: BigTreesVan
 Authors: Giona Matasci (giona.matasci@gmail.com)
-File Name: MAIN_CHM_Vancouver.py
-Objective: Build high-res nDSM from LiDAR for the city of Vancouver.
+File Name: MAIN_BigTrees_Vancouver.py
+Objective: Build high-res CHM from LiDAR for the city of Vancouver, detect treetops, segment crowns and extract attributes
 """
 
 ## TO DO -------------------------------------------------------------------
-# - save PARAMS object in wkg folder
-# - treetops cannot be closer than a certain distance -- not exactly working yet, somehow min_distance_peaks not working well
+
+## STILL TO DO:
+# - lastile producing weird number of tiles
 # - remove small single pixel segments with some majority vote filter and update unique labels. To check which ones are with:
         # unique, counts = np.unique(segments_arr, return_counts=True)
         # unique_counts = pd.DataFrame({'lab':unique, 'counts':counts})
         # srt_unique_counts = unique_counts.sort('counts')
 # - check usage of all cores
-# - remove tile buffers? (in lastools or in arcpy w extent.Xmin+buffer, etc.)
+# - treetop finder varying with height (from R?)
 # - watershed segmentation with markers: python vs OTB
-# - how to stitch back tiles?
+# - grid search on key parameters
+# - remove tile buffers? (in lastools or in arcpy w extent.Xmin+buffer, etc.)
+# - how to stitch back tiles? -- possibly with http://desktop.arcgis.com/en/arcmap/latest/tools/spatial-analyst-toolbox/remove-raster-segment-tiling-artifacts.htm
 
-## STILL TO DO:
 # Prior to actual run:
 # - reset all parameters to full run values
 
 ## SOLVED:
+# - treetops cannot be closer than a certain distance -- corner_peaks() handles min_distance_peaks properly (peak_local_max() does not)
+# - save PARAMS object in wkg folder -- done as JSON file
 # - put in a folder that does not get deleted the shps that are source for lyrs files -- folder in "D:\Research\ANALYSES\BigTreesVan\mxds\lyrs\source_layers"
 # - lasgrid and las2dem create raster tiles with a difference of 1 row/column -- they still do but using a common layers extent we can clip rasters to a common extent
 # - add final layers to mxd with symbology
 
 ## IMPORT MODULES ---------------------------------------------------------------
 
-## Add LAStools bin directory to the system PATH environment variable by:
-# "Edit the system environment variables" --> "Environment variables"
-# --> select variable "PATH" in "User variables for gmatasci" --> "Edit..."
-# --> paste "C:\LAStools\bin" after a ";" without any space
 
 from __future__ import division  # to allow floating point divisions
 import os
@@ -47,15 +47,11 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 from skimage.morphology import *
 from skimage.feature import *
-from scipy import ndimage as ndi
-from skimage import img_as_ubyte
 from skimage.filters import rank
 import pandas as pd
+import json
 import multiprocessing as mp
 from functools import partial
-from collections import OrderedDict
-import json
-
 
 sys.path.append(r'D:\Research\MyPythonModules')
 sys.path.append(r'D:\Research\ANALYSES\NationalMappingForestAttributes\WKG_DIR_NationalMappingForestAttributes\code')
@@ -65,7 +61,7 @@ from Functions_NatMapping_Python import*
 
 if __name__ == '__main__':
 
-    mpl.rc('image', interpolation='none')
+    mpl.rc('image', interpolation='none')   ## to change ugly default behavior of image/imshow plots
 
 ## PARAMETERS ----------------------------------------------------------------
 
@@ -87,10 +83,9 @@ if __name__ == '__main__':
 
     # PARAMS['dataset_name'] = '200m_2tiles'
     # PARAMS['dataset_name'] = '500m_1tile'
-    # PARAMS['dataset_name'] = '1000m_1tile_SP'
+    PARAMS['dataset_name'] = '1000m_1tile_SP'
     # PARAMS['dataset_name'] = '1000m_1tile_DT'
-    PARAMS['dataset_name'] = '1000m_1tile_PW'
-
+    # PARAMS['dataset_name'] = '1000m_1tile_PW'
 
     #### TO LAZ and remove unzipped las
     # PARAMS['data_dir'] = os.path.join(PARAMS['base_dir'], r'E:\BigTreesVan_data')
@@ -109,8 +104,7 @@ if __name__ == '__main__':
     # PARAMS['tile_size'] = 1000      ## size of tiles received from City of Vancouver
     PARAMS['tile_size'] = 800
 
-    PARAMS['tile_buffer'] = 0
-    # PARAMS['tile_buffer'] = 30
+    PARAMS['tile_buffer'] = 30
 
     PARAMS['step'] = 0.3  ## pixel size of raster layers (DSM, CHM, masks, etc.)
 
@@ -118,8 +112,8 @@ if __name__ == '__main__':
     PARAMS['isolated'] = 50     ## lasnoise parameter to remove powerlines: remove points that have less neighboring points than this threshold in the 3x3 voxel neighborhood
 
     PARAMS['freeze_dist'] = 0.8   ## las2dem spike-free CHM parameter
-    PARAMS['subcircle'] = 0.2  ## lasgrid parameter in vegetation mask to thicken point by adding a discrete ring of 8 new points that form a circle with radius "subcircle"
-    PARAMS['fill'] = 0  ## lasgrid parameter in vegetation mask to fill voids in the grid with a square search radius "fill" numper of pixels
+    PARAMS['subcircle'] = 0.2   ## lasgrid parameter in vegetation mask to thicken point by adding a discrete ring of 8 new points that form a circle with radius "subcircle"
+    PARAMS['fill'] = 0          ## lasgrid parameter in vegetation mask to fill voids in the grid with a square search radius "fill" numper of pixels
 
     PARAMS['ht_thresh'] = 2   ## height threshold to filter low vegetation and other structures from masked DSM
 
@@ -196,10 +190,10 @@ if __name__ == '__main__':
 
         ## To access to the points from neighbouring tiles.
         # lasindex(in_dir=tile_las_dir, in_ext='las', nr_cores=PARAMS['nr_cores'], verbose=True)
-        #
-        # ## Create buffered tiles
-        # lastile(in_dir=tile_las_dir, in_ext='las', out_dir=tile_laz_dir, out_ext='laz', tile_size=PARAMS['tile_size'],
-        #        tile_buffer=PARAMS['tile_buffer'], nr_cores=PARAMS['nr_cores'], verbose=True)
+
+        ## Create buffered tiles
+        lastile(in_dir=tile_las_dir, in_ext='las', out_dir=tile_laz_dir, out_ext='laz', tile_size=PARAMS['tile_size'],
+               tile_buffer=PARAMS['tile_buffer'], nr_cores=PARAMS['nr_cores'], verbose=True)
 
 
 ## DTM/DSM AND VEGETATION MASK COMPUTATION ----------------------------------------------------------------
