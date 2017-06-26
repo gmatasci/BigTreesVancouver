@@ -8,13 +8,9 @@ Objective: Build high-res CHM from LiDAR for the city of Vancouver, detect treet
 ## TO DO -------------------------------------------------------------------
 
 ## STILL TO DO:
-# - lastile producing weird number of tiles
-# - remove small single pixel segments with some majority vote filter and update unique labels. To check which ones are with:
-        # unique, counts = np.unique(segments_arr, return_counts=True)
-        # unique_counts = pd.DataFrame({'lab':unique, 'counts':counts})
-        # srt_unique_counts = unique_counts.sort('counts')
-# - check usage of all cores
 # - treetop finder varying with height (from R?)
+# - lastile producing weird number of tiles
+# - check usage of all cores
 # - watershed segmentation with markers: python vs OTB
 # - grid search on key parameters
 # - remove tile buffers? (in lastools or in arcpy w extent.Xmin+buffer, etc.)
@@ -29,6 +25,10 @@ Objective: Build high-res CHM from LiDAR for the city of Vancouver, detect treet
 # - put in a folder that does not get deleted the shps that are source for lyrs files -- folder in "D:\Research\ANALYSES\BigTreesVan\mxds\lyrs\source_layers"
 # - lasgrid and las2dem create raster tiles with a difference of 1 row/column -- they still do but using a common layers extent we can clip rasters to a common extent
 # - add final layers to mxd with symbology
+# - remove small single pixel segments with some majority vote filter and update unique labels. To check which ones are with:
+        # unique, counts = np.unique(segments_arr, return_counts=True)
+        # unique_counts = pd.DataFrame({'lab':unique, 'counts':counts})
+        # srt_unique_counts = unique_counts.sort('counts') -- not happening anymore
 
 ## IMPORT MODULES ---------------------------------------------------------------
 
@@ -42,16 +42,22 @@ import logging
 import shutil     # to remove folders and their contents
 import gc       # to manually run garbage collection
 import arcpy
+# from arcpy.sa import *   ## for  arcpy.sa.RemoveRasterSegmentTilingArtifacts(r'D:\Research\ANALYSES\BigTreesVan\wkg\temp\200m_2tiles\tiles_segmented\484200_5457400_segments_img.asc')
 import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 from skimage.morphology import *
 from skimage.feature import *
 from skimage.filters import rank
+from scipy.ndimage.morphology import binary_fill_holes
 import pandas as pd
 import json
 import multiprocessing as mp
 from functools import partial
+
+XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+import rpy2.robjects as robjects
+XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 
 sys.path.append(r'D:\Research\MyPythonModules')
 sys.path.append(r'D:\Research\ANALYSES\NationalMappingForestAttributes\WKG_DIR_NationalMappingForestAttributes\code')
@@ -67,8 +73,8 @@ if __name__ == '__main__':
 
     PARAMS = {}
 
-    PARAMS['lidar_processing'] = True
-    # PARAMS['lidar_processing'] = False
+    # PARAMS['lidar_processing'] = True
+    PARAMS['lidar_processing'] = False
 
     PARAMS['raster_processing'] = True
     # PARAMS['raster_processing'] = False
@@ -81,11 +87,14 @@ if __name__ == '__main__':
 
     PARAMS['base_dir'] = r'D:\Research\ANALYSES\BigTreesVan'
 
+    PARAMS['experiment_name'] = '0p3m_PF_DSM_minDistpeaks_8'   ## '1st_ret_DSM'
+
     # PARAMS['dataset_name'] = '200m_2tiles'
     # PARAMS['dataset_name'] = '500m_1tile'
     PARAMS['dataset_name'] = '1000m_1tile_SP'
     # PARAMS['dataset_name'] = '1000m_1tile_DT'
     # PARAMS['dataset_name'] = '1000m_1tile_PW'
+    # PARAMS['dataset_name'] = '1000m_1tile_QE'
 
     #### TO LAZ and remove unzipped las
     # PARAMS['data_dir'] = os.path.join(PARAMS['base_dir'], r'E:\BigTreesVan_data')
@@ -93,39 +102,53 @@ if __name__ == '__main__':
     PARAMS['data_dir'] = os.path.join(PARAMS['base_dir'], r'wkg\trial_data_'+PARAMS['dataset_name'])
 
     PARAMS['wkg_dir'] = os.path.join(PARAMS['base_dir'], 'wkg')
-    PARAMS['temp_dir'] = os.path.join(PARAMS['wkg_dir'], 'temp', PARAMS['dataset_name'])
+    PARAMS['temp_dir'] = os.path.join(PARAMS['wkg_dir'], 'temp', PARAMS['dataset_name'], PARAMS['experiment_name'])
 
     PARAMS['input_mxd'] = os.path.join(PARAMS['base_dir'], 'mxds', r'VanBigTrees_empty.mxd')  ## path to empty mxd that has to have a scale bar (will adapt automatically) and bookmarks already set
-    PARAMS['output_mxd'] = os.path.join(PARAMS['base_dir'], 'mxds', r'VanBigTrees_'+PARAMS['dataset_name']+'.mxd')  ## path to final mxd to save results
+    PARAMS['output_mxd'] = os.path.join(PARAMS['base_dir'], 'mxds', r'VanBigTrees_'+PARAMS['dataset_name']+'_'+PARAMS['experiment_name']+'.mxd')  ## path to final mxd to save results
     PARAMS['nr_cores'] = 32
 
     PARAMS['buffer_mode_las2dem'] = 'NONE'
 
-    # PARAMS['tile_size'] = 1000      ## size of tiles received from City of Vancouver
-    PARAMS['tile_size'] = 800
+    PARAMS['tile_size'] = 500      ## size of tiles received from City of Vancouver
+    # PARAMS['tile_size'] = 100
 
-    PARAMS['tile_buffer'] = 30
+    PARAMS['tile_buffer'] = 40
 
-    PARAMS['step'] = 0.3  ## pixel size of raster layers (DSM, CHM, masks, etc.)
+    PARAMS['step'] = 0.3  ## 0.3, pixel size of raster layers (DSM, CHM, masks, etc.)
 
     PARAMS['cell_size'] = 2     ## lasnoise parameter to remove powerlines: size in meters of each voxel of the 3x3 voxel neighborhood
     PARAMS['isolated'] = 50     ## lasnoise parameter to remove powerlines: remove points that have less neighboring points than this threshold in the 3x3 voxel neighborhood
 
+    PARAMS['DEM_type'] = 'PF_DSM'  ## 'DSM'
     PARAMS['freeze_dist'] = 0.8   ## las2dem spike-free CHM parameter
     PARAMS['subcircle'] = 0.2   ## lasgrid parameter in vegetation mask to thicken point by adding a discrete ring of 8 new points that form a circle with radius "subcircle"
     PARAMS['fill'] = 0          ## lasgrid parameter in vegetation mask to fill voids in the grid with a square search radius "fill" numper of pixels
 
     PARAMS['ht_thresh'] = 2   ## height threshold to filter low vegetation and other structures from masked DSM
 
-    PARAMS['disk_radius'] = 5  ## structuring element for morphological operations (opening(), reconstruction()) on vegetation mask and chm: radius of 5 means a 5*2+1 diameter disk
+    PARAMS['disk_radius'] = 5  ## 5, structuring element for morphological operations (opening(), reconstruction()) on vegetation mask and chm: radius of 5 means a 5*2+1 diameter disk
 
-    PARAMS['min_distance_peaks'] = 9   ## minimum separation in pixels between treetops in peak_local_max() and corner_peaks(), i.e. 9 pix = 9*0.3 = 3 m @ 0.3 m spatial resolution
+    PARAMS['min_distance_peaks'] = 8   ## 9, minimum separation in pixels between treetops in peak_local_max() and corner_peaks(), i.e. 9 pix = 9*0.3 = 3 m @ 0.3 m spatial resolution
 
-    PARAMS['gr_names_keys'] = {'VegMask':'veg_mask',
-                               'CHM':'chm_raw',
+    PARAMS['compactness'] = 0.1   ## segment compactness parameter for watershed algorithm, between 0 (default that leaves segments as they are) and 1 (extremely compact)
+
+    PARAMS['gr_names_keys'] = {'VegMaskRaw': 'veg_mask_raw',
+                               'VegMaskFilled': 'veg_mask_filled',
+                               'CHMtreeTops': 'chm_raw',
+                               'CHMsegments': 'chm_reconstr',
                                'TreeCrown': 'segments_polyg',
-                               'TreeTop':'tree_tops'}   ## MXD group names and corresponding file key for glob.glob()
+                               'TreeTop': 'tree_tops'}   ## MXD group names and corresponding file key for glob.glob()
 
+    XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+    robjects.r('''
+            library(ForestTools)
+            library(raster)
+            aa <- c(0, 4, 6)
+            ''')
+
+    not working
+    XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 
 ## START ---------------------------------------------------------------------
 
@@ -136,7 +159,7 @@ if __name__ == '__main__':
 
     start_time = tic()
 
-    params_filename = 'PARAMS_%s.json' % PARAMS['dataset_name']
+    params_filename = 'PARAMS_%s_%s.json' % (PARAMS['dataset_name'], PARAMS['experiment_name'])
     with open(os.path.join(PARAMS['wkg_dir'], params_filename), 'w') as fp:
         json.dump(PARAMS, fp)
 
@@ -189,7 +212,7 @@ if __name__ == '__main__':
         # lasinfo(in_dir=tile_las_dir, file_name='CoV_4840E_54570N', in_ext='las', verbose=True)
 
         ## To access to the points from neighbouring tiles.
-        # lasindex(in_dir=tile_las_dir, in_ext='las', nr_cores=PARAMS['nr_cores'], verbose=True)
+        lasindex(in_dir=tile_las_dir, in_ext='las', nr_cores=PARAMS['nr_cores'], verbose=True)
 
         ## Create buffered tiles
         lastile(in_dir=tile_las_dir, in_ext='las', out_dir=tile_laz_dir, out_ext='laz', tile_size=PARAMS['tile_size'],
@@ -206,8 +229,8 @@ if __name__ == '__main__':
         lasheight(in_dir=tile_denoised_dir, in_ext='laz', out_dir=tile_ht_norm_dir, replace_z=True,
                   nr_cores=PARAMS['nr_cores'], verbose=True)
 
-        ## Pit-free CHM (DSM from height normalized point cloud)
-        las2dem(in_dir=tile_ht_norm_dir, in_ext='laz', DEM_type='PF_DSM', step=PARAMS['step'],
+        # ## Pit-free CHM (DSM from height normalized point cloud)
+        las2dem(in_dir=tile_ht_norm_dir, in_ext='laz', DEM_type=PARAMS['DEM_type'], step=PARAMS['step'],
                 freeze_dist=PARAMS['freeze_dist'], out_dir=tile_dem_dir, hillshaded=False,
                 buffer_mode=PARAMS['buffer_mode_las2dem'],
                 nr_cores=PARAMS['nr_cores'], verbose=True)
@@ -235,7 +258,7 @@ if __name__ == '__main__':
         #         os.remove(f)
 
         ## Lasgrid in classif mode to keep high and mid vegetation (no class 4 in Vancouver data: mid vegetation)
-        lasgrid(in_dir=tile_ht_norm_dir, key='*', in_ext='laz', out_dir=tile_mask_dir, out_name='_'+PARAMS['gr_names_keys']['VegMask'],
+        lasgrid(in_dir=tile_ht_norm_dir, key='*', in_ext='laz', out_dir=tile_mask_dir, out_name='_'+PARAMS['gr_names_keys']['VegMaskRaw'],
                 step=PARAMS['step'], action='mask', classes_to_keep='4 5',
                 subcircle=PARAMS['subcircle'], fill=PARAMS['fill'], nr_MB_mem=2000,
                 verbose=True)
@@ -249,9 +272,9 @@ if __name__ == '__main__':
         print("Raster processing")
 
         ## List file paths of all the DSM and vegetation mask tiles
-        file_key = os.path.join(tile_dem_dir, '*PF_DSM*.asc')
+        file_key = os.path.join(tile_dem_dir, '*'+PARAMS['DEM_type']+'*.asc')
         dsm_paths = glob.glob(file_key)
-        file_key = os.path.join(tile_mask_dir, '*_'+PARAMS['gr_names_keys']['VegMask']+'.asc')
+        file_key = os.path.join(tile_mask_dir, '*_'+PARAMS['gr_names_keys']['VegMaskRaw']+'.asc')
         mask_paths = glob.glob(file_key)
 
         ## Stop if different tiles have been creeated
@@ -296,87 +319,65 @@ if __name__ == '__main__':
 
             ## Convert non-vegetation (no data) pixels to 0
             mask_arr[mask_arr==-9999] = 0
-            if PARAMS['plot_figures']:
-                plt.figure()
-                plt.title('Veg. mask')
-                plt.imshow(mask_arr)
-                plt.colorbar()
 
             ## Denoise vegetation mask with morphological opening
             mask_open_arr = opening(mask_arr, selem=disk(PARAMS['disk_radius']))
-            if PARAMS['plot_figures']:
-                plt.figure()
-                plt.title('Veg. mask opened')
-                plt.imshow(mask_open_arr)
-                plt.colorbar()
+
+            ## Fill holes in vegetation mask
+            mask_open_filled_arr = binary_fill_holes(mask_open_arr).astype(int)
 
             ## Build raw CHM (the one height values must be read from) by masking out non-vegetation DSM pixels and pixels lower than a height threshold
-            chm_raw_arr = dsm_arr * mask_open_arr
+            chm_raw_arr = dsm_arr * mask_open_filled_arr
             chm_raw_arr[chm_raw_arr < PARAMS['ht_thresh']] = 0   ## sets to 0 pixels lower than threshold and -9999 at the borders
+
             if PARAMS['plot_figures']:
-                plt.figure()
-                plt.title('CHM raw')
-                plt.imshow(chm_raw_arr)
-                plt.colorbar()
+                plt.figure(), plt.title('Veg. mask'), plt.imshow(mask_arr), plt.colorbar()
+                plt.figure(), plt.title('Veg. mask opened'), plt.imshow(mask_open_arr), plt.colorbar()
+                plt.figure(), plt.title('Veg. mask opened and filled'), plt.imshow(mask_open_filled_arr), plt.colorbar()
+                plt.figure(), plt.title('CHM raw'), plt.imshow(chm_raw_arr), plt.colorbar()
+
             if PARAMS['write_files']:
                 chm_raw = array_2_raster(chm_raw_arr, spatial_info)
-                arcpy.RasterToASCII_conversion(chm_raw, os.path.join(tile_final_dir, tile_name+'_'+PARAMS['gr_names_keys']['CHM']+'.asc'))
+                arcpy.RasterToASCII_conversion(chm_raw, os.path.join(tile_final_dir, tile_name+'_'+PARAMS['gr_names_keys']['CHMtreeTops']+'.asc'))
+                mask_open_filled_towrite_arr = np.copy(mask_open_filled_arr)
+                mask_open_filled_towrite_arr[mask_open_filled_towrite_arr == 0] = -9999
+                mask_open_filled_towrite = array_2_raster(mask_open_filled_towrite_arr, spatial_info)
+                arcpy.RasterToASCII_conversion(mask_open_filled_towrite, os.path.join(tile_mask_dir, tile_name + '_' + PARAMS['gr_names_keys']['VegMaskFilled'] + '.asc'))
 
 
-    #### TREETOP DETECTION -------------------------------------------------------------------
+#### TREETOP DETECTION -------------------------------------------------------------------
 
             ## Build integer CHM for faster image processing
             chm_raw_arr_int = chm_raw_arr * 100  ## multiply by 100 to keep 2 decimal when converting to int for rank.median()
             chm_raw_arr_int = chm_raw_arr_int.astype(np.uint16)
             chm_median_arr = rank.median(chm_raw_arr_int, disk(2))  ## denoises image to avoid high values for trees whose treetop is close to high buildings
-            if PARAMS['plot_figures']:
-                plt.figure()
-                plt.title('CHM median filtered')
-                plt.imshow(chm_median_arr)
-                plt.colorbar()
 
             ## Compute opening image
             chm_open_arr = opening(chm_median_arr, selem=disk(PARAMS['disk_radius']))
-            if PARAMS['plot_figures']:
-                plt.figure()
-                plt.title('CHM opened')
-                plt.imshow(chm_open_arr)
-                plt.colorbar()
 
             ## Compute opening by reconstruction image with opening image as seed and CHM as mask
             chm_reconstr_arr = reconstruction(seed=chm_open_arr, mask=chm_median_arr, method='dilation', selem=disk(PARAMS['disk_radius']))
             if PARAMS['write_files']:
                 chm_reconstr = array_2_raster(chm_reconstr_arr, spatial_info)
-                arcpy.RasterToASCII_conversion(chm_reconstr, os.path.join(tile_final_dir, tile_name+'_chm_reconstr.asc'))
-            if PARAMS['plot_figures']:
-                plt.figure()
-                plt.title('CHM opened by reconstr.')
-                plt.imshow(chm_reconstr_arr)
-                plt.colorbar()
+                arcpy.RasterToASCII_conversion(chm_reconstr, os.path.join(tile_final_dir, tile_name+'_'+PARAMS['gr_names_keys']['CHMsegments']+'.asc'))
 
             ## Detect local maxima regions on opening by reconstruction CHM: results in flat tree tops and no noise
             local_max_flat_arr = peak_local_max(chm_reconstr_arr, min_distance=PARAMS['min_distance_peaks'], indices=False)  ## with indices=False, the output is a boolean matrix
-            if PARAMS['plot_figures']:
-                plt.figure()
-                plt.title('Local max flat')
-                plt.imshow(local_max_flat_arr)
-                plt.colorbar()
 
             ## Detect local maxima on median filtered CHM: results in true tree tops but with noise
             local_max_raw_arr = corner_peaks(chm_median_arr, min_distance=PARAMS['min_distance_peaks'], indices=False)  ## corner_peaks() respects the min_distance criterion, instead peak_local_max() does not
-            if PARAMS['plot_figures']:
-                plt.figure()
-                plt.title('Local max raw')
-                plt.imshow(dilation(local_max_raw_arr, selem=disk(2)))
-                plt.colorbar()
 
             ## Keep only true treetops in within flat tops
             local_max_arr = local_max_flat_arr * local_max_raw_arr
+
             if PARAMS['plot_figures']:
-                plt.figure()
-                plt.title('Local max')
-                plt.imshow(dilation(local_max_arr, selem=disk(2)))
-                plt.colorbar()
+                plt.figure(), plt.title('CHM median filtered'), plt.imshow(chm_median_arr), plt.colorbar()
+                plt.figure(), plt.title('CHM opened'), plt.imshow(chm_open_arr), plt.colorbar()
+                plt.figure(), plt.title('CHM opened by reconstr.'), plt.imshow(chm_reconstr_arr), plt.colorbar()
+                plt.figure(), plt.title('Local max flat'), plt.imshow(local_max_flat_arr), plt.colorbar()
+                plt.figure(), plt.title('Local max raw'), plt.imshow(dilation(local_max_raw_arr, selem=disk(2))), plt.colorbar()
+                plt.figure(), plt.title('Local max'), plt.imshow(dilation(local_max_arr, selem=disk(2))), plt.colorbar()
+
             if PARAMS['write_files']:
                 local_max_visual = array_2_raster(dilation(local_max_arr, selem=disk(2)).astype(int), spatial_info)
                 arcpy.RasterToASCII_conversion(local_max_visual, os.path.join(tile_final_dir, tile_name+'_tree_tops.asc'))
@@ -387,25 +388,13 @@ if __name__ == '__main__':
             markers_arr = local_max_arr.astype(int)
             markers_arr[local_max_arr] = np.arange(1, sum(sum(local_max_arr)) + 1)  # equivalent to the following but without repeated labels for contiguous pixels: ndi.label(local_max_arr.astype(int))[0]  ## assign unique labels to each marker to start the segmentation (same labels will be assigned to segments)
             markers_dilat_arr = dilation(markers_arr, selem=disk(1))  ## thicken markers with a disk of size 2 to avoid problems if local max is at the edge
-            segments_arr = watershed(image=gradient_arr, markers=markers_dilat_arr)
+            segments_arr = watershed(image=gradient_arr, markers=markers_dilat_arr, mask=mask_open_filled_arr, compactness=PARAMS['compactness'])
 
             if PARAMS['plot_figures']:
-                plt.figure()
-                plt.title('CHM reconstr')
-                plt.imshow(chm_reconstr_arr_int)
-                plt.colorbar()
-                plt.figure()
-                plt.title('Markers')
-                plt.imshow(dilation(markers_arr), cmap='prism')
-                plt.colorbar()
-                plt.figure()
-                plt.title('Gradient')
-                plt.imshow(gradient_arr)
-                plt.colorbar()
-                plt.figure()
-                plt.title('Segments')
-                plt.imshow(segments_arr, cmap='prism')
-                plt.colorbar()
+                plt.figure(), plt.title('CHM reconstr'), plt.imshow(chm_reconstr_arr_int), plt.colorbar()
+                plt.figure(), plt.title('Markers'), plt.imshow(dilation(markers_arr), cmap='prism'), plt.colorbar()
+                plt.figure(), plt.title('Gradient'), plt.imshow(gradient_arr), plt.colorbar()
+                plt.figure(), plt.title('Segments'), plt.imshow(segments_arr, cmap='prism'), plt.colorbar()
 
             ## Convert raster segments to shp
             segments = array_2_raster(segments_arr, spatial_info)
@@ -448,7 +437,7 @@ if __name__ == '__main__':
                         cursor.updateRow(row)
 
 
-    #### LOAD LAYERS INTO MXD PROJECT -------------------------------------------------------------------
+#### LOAD LAYERS INTO MXD PROJECT -------------------------------------------------------------------
 
     print("Loading layers into MXD")
 
@@ -459,21 +448,24 @@ if __name__ == '__main__':
     mxd.title = df.name
 
     ## Loop over the tiles in tile_final_dir
-    layer_paths = glob.glob(os.path.join(tile_mask_dir, '*_'+PARAMS['gr_names_keys']['VegMask']+'.asc'))
-    layer_paths.extend(glob.glob(os.path.join(tile_final_dir, '*_'+PARAMS['gr_names_keys']['CHM']+'.asc')))
+    layer_paths = glob.glob(os.path.join(tile_mask_dir, '*_'+PARAMS['gr_names_keys']['VegMaskRaw']+'.asc'))
+    layer_paths.extend(glob.glob(os.path.join(tile_mask_dir, '*_'+PARAMS['gr_names_keys']['VegMaskFilled']+'.asc')))
+    layer_paths.extend(glob.glob(os.path.join(tile_final_dir, '*_'+PARAMS['gr_names_keys']['CHMtreeTops']+'.asc')))
+    layer_paths.extend(glob.glob(os.path.join(tile_final_dir, '*_'+PARAMS['gr_names_keys']['CHMsegments']+'.asc')))
     layer_paths.extend(glob.glob(os.path.join(tile_final_dir,'*_'+PARAMS['gr_names_keys']['TreeTop']+'.asc')))
     layer_paths.extend(glob.glob(os.path.join(tile_segmented_dir, '*_'+PARAMS['gr_names_keys']['TreeCrown']+'.shp')))
     for layer_path in layer_paths:
-        if PARAMS['gr_names_keys']['TreeCrown'] in layer_path:
-            bla = 1
+        
         layer_to_add = arcpy.mapping.Layer(layer_path)
         arcpy.mapping.AddLayer(df, layer_to_add, "TOP")
 
         if PARAMS['gr_names_keys']['TreeTop'] in layer_path:
             source_lyr_path = os.path.join(PARAMS['base_dir'], 'mxds', 'lyrs', r'detected_treetops.lyr')
-        elif PARAMS['gr_names_keys']['CHM'] in layer_path:
-            source_lyr_path = os.path.join(PARAMS['base_dir'], 'mxds', 'lyrs', r'chm.lyr')
-        elif PARAMS['gr_names_keys']['VegMask'] in layer_path:
+        elif PARAMS['gr_names_keys']['CHMtreeTops'] in layer_path:
+            source_lyr_path = os.path.join(PARAMS['base_dir'], 'mxds', 'lyrs', r'chm_2_60.lyr')
+        elif PARAMS['gr_names_keys']['CHMsegments'] in layer_path:
+            source_lyr_path = os.path.join(PARAMS['base_dir'], 'mxds', 'lyrs', r'chm_segments_200_6000.lyr')
+        elif PARAMS['gr_names_keys']['VegMaskRaw'] in layer_path or PARAMS['gr_names_keys']['VegMaskFilled'] in layer_path:
             source_lyr_path = os.path.join(PARAMS['base_dir'], 'mxds', 'lyrs', r'vegetation_mask.lyr')
         elif PARAMS['gr_names_keys']['TreeCrown'] in layer_path:
             source_lyr_path = os.path.join(PARAMS['base_dir'], 'mxds', 'lyrs', r'segments_polyg.lyr')
