@@ -6,12 +6,14 @@
 import arcpy
 import numpy as np
 import os
+import subprocess
+
 
 ## Print infos about las/laz file
 def lasinfo(in_dir, file_name='', in_ext='laz', verbose=False):
     if verbose:
         print('lasinfo: getting infos on file(s)')
-    cmd = 'lasinfo %s\*%s.%s' \
+    cmd = 'lasinfo %s\*%s.%s -nh -nv -nmm -cd' \
           % (in_dir, file_name, in_ext)
     os.system(cmd)
 
@@ -124,7 +126,7 @@ def lasclassify(in_dir, out_dir, nr_cores, in_ext='laz', buffer_mode='NONE', ver
           % (in_dir, in_ext, buffer_cmd, out_dir, nr_cores)
     os.system(cmd)
 
-##
+## Build DSM (using 1st returns only or using the Pit-Free method), DTM or the correponding hillshade starting from height normalized point clouds
 def las2dem(in_dir, DEM_type, step, out_dir, nr_cores, in_ext='laz', freeze_dist=0, hillshaded=False, buffer_mode='NONE', verbose=False):
 
     if hillshaded:
@@ -147,7 +149,7 @@ def las2dem(in_dir, DEM_type, step, out_dir, nr_cores, in_ext='laz', freeze_dist
         return_type = '-keep_class 2'
     elif DEM_type == 'DSM':   ## uses first returns only
         return_type = '-first_only'
-    elif DEM_type == 'PF_DSM':     ## the spike free uses all returns implicitely
+    elif DEM_type == 'PF_DSM':     ## the spike free uses all returns implicitly
         return_type = '-spike_free %.2f' % freeze_dist
         file_name = (file_name+'_%.2f' % freeze_dist).replace('.', 'p')
 
@@ -160,10 +162,9 @@ def las2dem(in_dir, DEM_type, step, out_dir, nr_cores, in_ext='laz', freeze_dist
           % (in_dir, in_ext, return_type, step, hillshade_cmd, buffer_cmd, out_dir, file_name, nr_cores)
     os.system(cmd)
 
-
-##
+## Mosaic tiles together or build raster mask from classified point clouds
 def lasgrid(in_dir, out_dir, out_name, step, action, classes_to_keep='', subcircle=0, fill=0,
-            key='*', nr_MB_mem=1000, in_ext='laz', out_ext='asc', buffer_mode='NONE', verbose=False):
+            key='*', nr_MB_mem=1000, in_ext='laz', out_ext='asc', buffer_mode='NONE', nr_cores=1, verbose=False):
 
     if action == 'mosaic':
         if verbose:
@@ -186,16 +187,54 @@ def lasgrid(in_dir, out_dir, out_name, step, action, classes_to_keep='', subcirc
         buffer_cmd = ''
 
     cmd = 'lasgrid -i %s\%s.%s ' \
-          '%s %s -step %.2f -mem %d'  \
-          % (in_dir, key, in_ext, action_cmd, buffer_cmd, step, nr_MB_mem)
+          '%s %s -step %.2f -mem %d -cores %d'  \
+          % (in_dir, key, in_ext, action_cmd, buffer_cmd, step, nr_MB_mem, nr_cores)
     os.system(cmd)
 
+## Subsample las file to reduce its size
+def las2las(in_dir, out_dir, nr_cores, in_ext='laz', verbose=False):
+    if verbose:
+        print('las2las: subsampling las/laz file')
+    cmd = 'las2las -i %s\*.%s ' \
+          '-keep_random_fraction 0.001 ' \
+          '-olaz -odir %s -odix _subset -cores %d' \
+          % (in_dir, in_ext, out_dir, nr_cores)
+    os.system(cmd)
+
+## Sort las file to speed-up computation of metrics over polygons in a shp with lascanopy
+def lassort(in_dir, out_dir, nr_cores, in_ext='laz', verbose=False):
+    if verbose:
+        print('lassort: sorting las/laz files')
+    cmd = 'lassort -i %s\*.%s ' \
+          '-olaz -odir %s -odix _sorted -cores %d' \
+          % (in_dir, in_ext, out_dir, nr_cores)
+    os.system(cmd)
+
+## Compute lidar metrics over regular grids or for polygons in a shp
+def lascanopy(in_laz, in_shp, out_csv, ht_cutoff=2, metric_cmd='-p 5 10 25 50 75 90', verbose=False):
+
+    if verbose:
+        print('lascanopy: computing lidar metrics')
+
+    cmd = 'lascanopy -very_verbose -i %s ' \
+          '-keep_class 2 3 4 5 ' \
+          '-lop %s ' \
+          '-height_cutoff %.2f %s ' \
+          '-o %s' \
+          % (in_laz, in_shp, ht_cutoff, metric_cmd, out_csv)     # -keep_random_fraction 0.00001 OR -keep_every_nth 1000
+
+    ## Capture console output to get polygons with negative area to remove from df
+    p = subprocess.Popen(cmd, universal_newlines=True, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    text = p.stdout.read()
+    lines = text.split('\n')
+    lines = [l for l in lines if l[:7]=='polygon']
+    areas = np.array([l.split('area ')[1] for l in lines]).astype(np.float)
+    return areas > 0
 
 
 
-#
-#
-#
+
+
 # def lasthin(in_dir, out_dir, sub_step, subcircle, nr_cores, key='*', in_ext='laz', verbose=False):
 #     if verbose:
 #         print('lasthin: thinning tiles')

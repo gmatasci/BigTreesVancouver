@@ -9,12 +9,8 @@ Objective: Build high-res CHM from LiDAR for the city of Vancouver, detect treet
 
 ## STILL TO DO:
 # - treetop finder varying with height (from R?)
-# - lastile producing weird number of tiles
-# - check usage of all cores
 # - watershed segmentation with markers: python vs OTB
 # - grid search on key parameters
-# - remove tile buffers? (in lastools or in arcpy w extent.Xmin+buffer, etc.)
-# - how to stitch back tiles? -- possibly with http://desktop.arcgis.com/en/arcmap/latest/tools/spatial-analyst-toolbox/remove-raster-segment-tiling-artifacts.htm
 
 # Prior to actual run:
 # - reset all parameters to full run values
@@ -29,6 +25,12 @@ Objective: Build high-res CHM from LiDAR for the city of Vancouver, detect treet
         # unique, counts = np.unique(segments_arr, return_counts=True)
         # unique_counts = pd.DataFrame({'lab':unique, 'counts':counts})
         # srt_unique_counts = unique_counts.sort('counts') -- not happening anymore
+# - lastile producing weird number of tiles -- when running on whole Vancouver is ok
+# - check usage of all cores -- works for lastools functions with -cores option
+# - how to stitch back tiles? -- not needed, as results will be provided tiled. Could be done by simple merge as now the tiles no longer contain border segments. One possibility was with http://desktop.arcgis.com/en/arcmap/latest/tools/spatial-analyst-toolbox/remove-raster-segment-tiling-artifacts.htm
+# - remove tile buffers? (in lastools or in arcpy w extent.Xmin+buffer, etc.) -- not needed, plus final tiles with segments cannot be unbuffered
+
+
 
 ## IMPORT MODULES ---------------------------------------------------------------
 
@@ -42,7 +44,6 @@ import logging
 import shutil     # to remove folders and their contents
 import gc       # to manually run garbage collection
 import arcpy
-# from arcpy.sa import *   ## for  arcpy.sa.RemoveRasterSegmentTilingArtifacts(r'D:\Research\ANALYSES\BigTreesVan\wkg\temp\200m_2tiles\tiles_segmented\484200_5457400_segments_img.asc')
 import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -55,15 +56,8 @@ import json
 import multiprocessing as mp
 from functools import partial
 
-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
-import rpy2.robjects as robjects
-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
-
-sys.path.append(r'D:\Research\MyPythonModules')
-sys.path.append(r'D:\Research\ANALYSES\NationalMappingForestAttributes\WKG_DIR_NationalMappingForestAttributes\code')
-from mybasemodule import*
+from Functions_BigTrees_Vancouver import*
 from Functions_LAStools import*
-from Functions_NatMapping_Python import*
 
 if __name__ == '__main__':
 
@@ -76,8 +70,17 @@ if __name__ == '__main__':
     # PARAMS['lidar_processing'] = True
     PARAMS['lidar_processing'] = False
 
-    PARAMS['raster_processing'] = True
-    # PARAMS['raster_processing'] = False
+    # PARAMS['raster_processing'] = True
+    PARAMS['raster_processing'] = False
+
+    PARAMS['build_CHMs'] = True
+    # PARAMS['build_CHMs'] = False
+
+    PARAMS['segment_crowns'] = True
+    # PARAMS['segment_crowns'] = False
+
+    PARAMS['build_MXD'] = True
+    # PARAMS['build_MXD'] = False
 
     PARAMS['write_files'] = True
     # PARAMS['write_files'] = False
@@ -87,51 +90,47 @@ if __name__ == '__main__':
 
     PARAMS['base_dir'] = r'D:\Research\ANALYSES\BigTreesVan'
 
-    PARAMS['experiment_name'] = '0p3m_PF_DSM_minDistpeaks_8'   ## '1st_ret_DSM'
+    PARAMS['experiment_name'] = '0p3m_PF_CHM_minDistpeaks_7'
+    # PARAMS['experiment_name'] = '0p3m_PF_CHM'
 
-    # PARAMS['dataset_name'] = '200m_2tiles'
-    # PARAMS['dataset_name'] = '500m_1tile'
-    PARAMS['dataset_name'] = '1000m_1tile_SP'
-    # PARAMS['dataset_name'] = '1000m_1tile_DT'
-    # PARAMS['dataset_name'] = '1000m_1tile_PW'
+    PARAMS['dataset_name'] = 'tune_alg_10tiles'
     # PARAMS['dataset_name'] = '1000m_1tile_QE'
 
     #### TO LAZ and remove unzipped las
-    # PARAMS['data_dir'] = os.path.join(PARAMS['base_dir'], r'E:\BigTreesVan_data')
+    # PARAMS['data_dir'] = r'E:\BigTreesVan_data\LiDAR\CoV\Classified_LiDAR'
     #### TO LAZ and remove unzipped las
     PARAMS['data_dir'] = os.path.join(PARAMS['base_dir'], r'wkg\trial_data_'+PARAMS['dataset_name'])
 
     PARAMS['wkg_dir'] = os.path.join(PARAMS['base_dir'], 'wkg')
-    PARAMS['temp_dir'] = os.path.join(PARAMS['wkg_dir'], 'temp', PARAMS['dataset_name'], PARAMS['experiment_name'])
+    PARAMS['exp_dir'] = os.path.join(PARAMS['wkg_dir'], PARAMS['dataset_name'], PARAMS['experiment_name'])
 
     PARAMS['input_mxd'] = os.path.join(PARAMS['base_dir'], 'mxds', r'VanBigTrees_empty.mxd')  ## path to empty mxd that has to have a scale bar (will adapt automatically) and bookmarks already set
-    PARAMS['output_mxd'] = os.path.join(PARAMS['base_dir'], 'mxds', r'VanBigTrees_'+PARAMS['dataset_name']+'_'+PARAMS['experiment_name']+'.mxd')  ## path to final mxd to save results
-    PARAMS['nr_cores'] = 32
+    PARAMS['output_mxd'] = os.path.join(PARAMS['base_dir'], 'mxds', r'VanBigTrees_'+PARAMS['dataset_name']+'_'+PARAMS['experiment_name']+'.mxd')   ## path to final mxd to save results
 
-    PARAMS['buffer_mode_las2dem'] = 'NONE'
+    PARAMS['nr_cores'] = 32    ## number of cores to be used by lastools functions
 
-    PARAMS['tile_size'] = 500      ## size of tiles received from City of Vancouver
-    # PARAMS['tile_size'] = 100
+    PARAMS['tile_size'] = 500      ## tile size for lidar processing with lastools (half the tile size of tiles received from City of Vancouver)
 
-    PARAMS['tile_buffer'] = 40
+    PARAMS['tile_buffer'] = 30      ## tile buffer to avoid boundary problems (we expect no tree crown to be bigger than this)
 
     PARAMS['step'] = 0.3  ## 0.3, pixel size of raster layers (DSM, CHM, masks, etc.)
 
     PARAMS['cell_size'] = 2     ## lasnoise parameter to remove powerlines: size in meters of each voxel of the 3x3 voxel neighborhood
     PARAMS['isolated'] = 50     ## lasnoise parameter to remove powerlines: remove points that have less neighboring points than this threshold in the 3x3 voxel neighborhood
 
-    PARAMS['DEM_type'] = 'PF_DSM'  ## 'DSM'
+    PARAMS['DEM_type'] = 'PF_DSM'  ## las2dem parameter defining the type of DSM created
     PARAMS['freeze_dist'] = 0.8   ## las2dem spike-free CHM parameter
     PARAMS['subcircle'] = 0.2   ## lasgrid parameter in vegetation mask to thicken point by adding a discrete ring of 8 new points that form a circle with radius "subcircle"
-    PARAMS['fill'] = 0          ## lasgrid parameter in vegetation mask to fill voids in the grid with a square search radius "fill" numper of pixels
+    PARAMS['fill'] = 0          ## lasgrid parameter in vegetation mask to fill voids in the grid with a square search radius "fill" number of pixels
 
     PARAMS['ht_thresh'] = 2   ## height threshold to filter low vegetation and other structures from masked DSM
 
     PARAMS['disk_radius'] = 5  ## 5, structuring element for morphological operations (opening(), reconstruction()) on vegetation mask and chm: radius of 5 means a 5*2+1 diameter disk
 
-    PARAMS['min_distance_peaks'] = 8   ## 9, minimum separation in pixels between treetops in peak_local_max() and corner_peaks(), i.e. 9 pix = 9*0.3 = 3 m @ 0.3 m spatial resolution
+    PARAMS['min_distance_peaks'] = 7   ## minimum separation in pixels between treetops in peak_local_max() and corner_peaks(), i.e. 9 pix = 9*0.3 = 2.7 m @ 0.3 m spatial resolution
 
-    PARAMS['compactness'] = 0.1   ## segment compactness parameter for watershed algorithm, between 0 (default that leaves segments as they are) and 1 (extremely compact)
+    PARAMS['tree_ht_thresh'] = 10   ## height threshold in meters below which we remove segmented trees
+    PARAMS['crown_dm_thresh'] = 40  ## crown diameter threshold in meters above which the polygon is no more a tree but background instead
 
     PARAMS['gr_names_keys'] = {'VegMaskRaw': 'veg_mask_raw',
                                'VegMaskFilled': 'veg_mask_filled',
@@ -140,42 +139,35 @@ if __name__ == '__main__':
                                'TreeCrown': 'segments_polyg',
                                'TreeTop': 'tree_tops'}   ## MXD group names and corresponding file key for glob.glob()
 
-    XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
-    robjects.r('''
-            library(ForestTools)
-            library(raster)
-            aa <- c(0, 4, 6)
-            ''')
-
-    not working
-    XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 
 ## START ---------------------------------------------------------------------
 
 
     print(python_info())
 
-    print('Started on %s' % time.strftime('%a, %d %b %Y %H:%M:%S', time.localtime()))
+    print('MAIN_BigTrees_Vancouver.py: started on %s' % time.strftime('%a, %d %b %Y %H:%M:%S', time.localtime()))
+
+    print('Dataset: %s \nExperiment: %s' % (PARAMS['dataset_name'], PARAMS['experiment_name']))
 
     start_time = tic()
 
-    params_filename = 'PARAMS_%s_%s.json' % (PARAMS['dataset_name'], PARAMS['experiment_name'])
-    with open(os.path.join(PARAMS['wkg_dir'], params_filename), 'w') as fp:
+    params_filename = 'PARAMS_MAIN_%s_%s.json' % (PARAMS['dataset_name'], PARAMS['experiment_name'])
+    with open(os.path.join(PARAMS['exp_dir'], params_filename), 'w') as fp:
         json.dump(PARAMS, fp)
 
     arcpy.CheckOutExtension("3D")
     arcpy.CheckOutExtension("spatial")
     arcpy.env.overwriteOutput = True
 
-    arcgis_temp_dir = os.path.join(PARAMS['temp_dir'], 'arcgis_temp')
+    arcgis_temp_dir = os.path.join(PARAMS['exp_dir'], 'arcgis_temp')
     tile_las_dir = os.path.join(PARAMS['data_dir'], 'las')
     tile_laz_dir = os.path.join(PARAMS['data_dir'], 'laz')
-    tile_denoised_dir = os.path.join(PARAMS['temp_dir'], 'tiles_denoised')
-    tile_ht_norm_dir = os.path.join(PARAMS['temp_dir'], 'tiles_ht_norm')
-    tile_dem_dir = os.path.join(PARAMS['temp_dir'], 'tiles_dem')
-    tile_mask_dir = os.path.join(PARAMS['temp_dir'], 'tiles_mask')
-    tile_final_dir = os.path.join(PARAMS['temp_dir'], 'tiles_final')
-    tile_segmented_dir = os.path.join(PARAMS['temp_dir'], 'tiles_segmented')
+    tile_denoised_dir = os.path.join(PARAMS['exp_dir'], 'tiles_denoised')
+    tile_ht_norm_dir = os.path.join(PARAMS['exp_dir'], 'tiles_ht_norm')
+    tile_dem_dir = os.path.join(PARAMS['exp_dir'], 'tiles_dem')
+    tile_mask_dir = os.path.join(PARAMS['exp_dir'], 'tiles_mask')
+    tile_chm_treetops_dir = os.path.join(PARAMS['exp_dir'], 'tiles_chm_treetops')
+    tile_segmented_dir = os.path.join(PARAMS['exp_dir'], 'tiles_segmented')
 
     dirs = [arcgis_temp_dir,
             tile_las_dir,
@@ -184,7 +176,7 @@ if __name__ == '__main__':
             tile_ht_norm_dir,
             tile_dem_dir,
             tile_mask_dir,
-            tile_final_dir,
+            tile_chm_treetops_dir,
             tile_segmented_dir
             ]
 
@@ -229,39 +221,16 @@ if __name__ == '__main__':
         lasheight(in_dir=tile_denoised_dir, in_ext='laz', out_dir=tile_ht_norm_dir, replace_z=True,
                   nr_cores=PARAMS['nr_cores'], verbose=True)
 
-        # ## Pit-free CHM (DSM from height normalized point cloud)
-        las2dem(in_dir=tile_ht_norm_dir, in_ext='laz', DEM_type=PARAMS['DEM_type'], step=PARAMS['step'],
+        ## Pit-free CHM (DSM from height normalized point cloud)
+        las2dem(in_dir=tile_ht_norm_dir, in_ext='laz', DEM_type='DSM', step=PARAMS['step'],
                 freeze_dist=PARAMS['freeze_dist'], out_dir=tile_dem_dir, hillshaded=False,
-                buffer_mode=PARAMS['buffer_mode_las2dem'],
                 nr_cores=PARAMS['nr_cores'], verbose=True)
-
-        # ## Use lasgrid as a mosaicking tool: action='mosaic' takes the highest pixel value, to avoid zero pixels at boundary of DSMs ending up in mosaic
-        # if PARAMS['write_files']:
-        #     lasgrid(in_dir=tile_dem_dir, key='*PF_DSM*', out_dir=PARAMS['wkg_dir'],
-        #             out_name=('PF_CHM_fdist%0.2f' % PARAMS['freeze_dist']).replace('.', 'p'),
-        #             step=PARAMS['step'], action='mosaic', nr_MB_mem=2000, in_ext='asc', verbose=True)
-        #     filelist = glob.glob(os.path.join(tile_dem_dir, '*.asc'))
-        #     for f in filelist:
-        #         os.remove(f)
-
-        # ## DTM
-        # las2dem(in_dir=tile_laz_dir, in_ext='laz', DEM_type='DTM', step=PARAMS['step'],
-        #         out_dir=tile_dem_dir, hillshaded=False,
-        #         buffer_mode=PARAMS['buffer_mode_las2dem'],
-        #         nr_cores=PARAMS['nr_cores'], verbose=True)
-
-        # if PARAMS['write_files']:
-        #     lasgrid(in_dir=tile_dem_dir, key='*DTM*', out_dir=PARAMS['wkg_dir'], out_name='DTM_full',
-        #             step=PARAMS['step'], action='mosaic', nr_MB_mem=2000, in_ext='asc', verbose=True)
-        #     filelist = glob.glob(os.path.join(tile_dem_dir, '*.asc'))
-        #     for f in filelist:
-        #         os.remove(f)
 
         ## Lasgrid in classif mode to keep high and mid vegetation (no class 4 in Vancouver data: mid vegetation)
         lasgrid(in_dir=tile_ht_norm_dir, key='*', in_ext='laz', out_dir=tile_mask_dir, out_name='_'+PARAMS['gr_names_keys']['VegMaskRaw'],
                 step=PARAMS['step'], action='mask', classes_to_keep='4 5',
                 subcircle=PARAMS['subcircle'], fill=PARAMS['fill'], nr_MB_mem=2000,
-                verbose=True)
+                nr_cores=PARAMS['nr_cores'], verbose=True)
 
 
 
@@ -284,214 +253,277 @@ if __name__ == '__main__':
         ## Loop over the tiles
         for i_tile, _ in enumerate(dsm_paths):
 
-            print('tile %d / %d ...' % (i_tile+1, len(dsm_paths)))
-
             ## Read DSM and vegetation mask and related infos
             dsm = arcpy.Raster(dsm_paths[i_tile])
             mask = arcpy.Raster(mask_paths[i_tile])
             tile_name = dsm.name.split('_')[0]+'_'+dsm.name.split('_')[1]  ## root to rename all tile-based layers
-            _, spatial_info = raster_2_array(dsm)   ## read reference spatial_info to be changed later on based on common extent
 
-            ## Build common extent between DSM and mask (las2dem and lasgrid somehow produce rasters w different extents, although pixel grids overlap)
-            common_extent = dsm.extent
-            common_extent.XMin = max(dsm.extent.XMin, mask.extent.XMin)
-            common_extent.YMin = max(dsm.extent.YMin, mask.extent.YMin)
-            common_extent.XMax = min(dsm.extent.XMax, mask.extent.XMax)
-            common_extent.YMax = min(dsm.extent.YMax, mask.extent.YMax)
+            print('tile %s (%d/%d) ...' % (tile_name, i_tile+1, len(dsm_paths)))
 
-            ## Update spatial_info based on common extent
-            spatial_info['lower_left'].X = common_extent.XMin
-            spatial_info['lower_left'].Y = common_extent.YMin
+            chm_raw_path = os.path.join(tile_chm_treetops_dir, tile_name + '_' + PARAMS['gr_names_keys']['CHMtreeTops'] + '.asc')
 
-            ## Clip rasters to common extent to allow processing as numpy arrays
-            dsm_clipped_path = os.path.join(arcgis_temp_dir, dsm.name.replace('.asc', '_clipped.dat'))      ## has to be saved in an actual directory (in_memory/ did not work)
-            arcpy.Clip_management(dsm, str(common_extent), dsm_clipped_path)    ## str(extent) creates an 'Envelope' object
-            dsm_clipped = arcpy.Raster(dsm_clipped_path)
-            mask_clipped_path = os.path.join(arcgis_temp_dir, mask.name.replace('.asc', '_clipped.dat'))
-            arcpy.Clip_management(mask, str(common_extent), mask_clipped_path)
-            mask_clipped = arcpy.Raster(mask_clipped_path)
+            if PARAMS['build_CHMs']:
 
-            ## Convert clipped rasters to array
-            dsm_arr, _ = raster_2_array(dsm_clipped)
-            arcpy.Delete_management(dsm_clipped_path)
-            mask_arr, _ = raster_2_array(mask_clipped)
-            arcpy.Delete_management(mask_clipped_path)
+                # if os.path.exists(chm_raw_path):
+                #     continue
 
-            ## Convert non-vegetation (no data) pixels to 0
-            mask_arr[mask_arr==-9999] = 0
+                _, spatial_info = raster_2_array(dsm)   ## read reference spatial_info to be changed later on based on common extent
 
-            ## Denoise vegetation mask with morphological opening
-            mask_open_arr = opening(mask_arr, selem=disk(PARAMS['disk_radius']))
+                ## Build common extent between DSM and mask (las2dem and lasgrid somehow produce rasters w different extents, although pixel grids overlap)
+                common_extent = dsm.extent
+                common_extent.XMin = np.ceil(max(dsm.extent.XMin, mask.extent.XMin))
+                common_extent.YMin = np.ceil(max(dsm.extent.YMin, mask.extent.YMin))
+                common_extent.XMax = np.floor(min(dsm.extent.XMax, mask.extent.XMax))
+                common_extent.YMax = np.floor(min(dsm.extent.YMax, mask.extent.YMax))
 
-            ## Fill holes in vegetation mask
-            mask_open_filled_arr = binary_fill_holes(mask_open_arr).astype(int)
+                ## Check if mask is empty and skip tile if true
+                if (common_extent.XMin >= common_extent.XMax) | (common_extent.YMin >= common_extent.YMax):
+                    continue
 
-            ## Build raw CHM (the one height values must be read from) by masking out non-vegetation DSM pixels and pixels lower than a height threshold
-            chm_raw_arr = dsm_arr * mask_open_filled_arr
-            chm_raw_arr[chm_raw_arr < PARAMS['ht_thresh']] = 0   ## sets to 0 pixels lower than threshold and -9999 at the borders
+                ## Update spatial_info based on common extent
+                spatial_info['lower_left'].X = common_extent.XMin
+                spatial_info['lower_left'].Y = common_extent.YMin
 
-            if PARAMS['plot_figures']:
-                plt.figure(), plt.title('Veg. mask'), plt.imshow(mask_arr), plt.colorbar()
-                plt.figure(), plt.title('Veg. mask opened'), plt.imshow(mask_open_arr), plt.colorbar()
-                plt.figure(), plt.title('Veg. mask opened and filled'), plt.imshow(mask_open_filled_arr), plt.colorbar()
-                plt.figure(), plt.title('CHM raw'), plt.imshow(chm_raw_arr), plt.colorbar()
+                ## Clip rasters to common extent to allow processing as numpy arrays
+                dsm_clipped_path = os.path.join(arcgis_temp_dir, dsm.name.replace('.asc', '_clipped.dat'))      ## has to be saved in an actual directory (in_memory/ did not work)
+                arcpy.Clip_management(dsm, str(common_extent), dsm_clipped_path)    ## str(extent) creates an 'Envelope' object
+                dsm_clipped = arcpy.Raster(dsm_clipped_path)
+                mask_clipped_path = os.path.join(arcgis_temp_dir, mask.name.replace('.asc', '_clipped.dat'))
+                arcpy.Clip_management(mask, str(common_extent), mask_clipped_path)
+                mask_clipped = arcpy.Raster(mask_clipped_path)
 
-            if PARAMS['write_files']:
-                chm_raw = array_2_raster(chm_raw_arr, spatial_info)
-                arcpy.RasterToASCII_conversion(chm_raw, os.path.join(tile_final_dir, tile_name+'_'+PARAMS['gr_names_keys']['CHMtreeTops']+'.asc'))
-                mask_open_filled_towrite_arr = np.copy(mask_open_filled_arr)
-                mask_open_filled_towrite_arr[mask_open_filled_towrite_arr == 0] = -9999
-                mask_open_filled_towrite = array_2_raster(mask_open_filled_towrite_arr, spatial_info)
-                arcpy.RasterToASCII_conversion(mask_open_filled_towrite, os.path.join(tile_mask_dir, tile_name + '_' + PARAMS['gr_names_keys']['VegMaskFilled'] + '.asc'))
+                ## Convert clipped rasters to array
+                dsm_arr, _ = raster_2_array(dsm_clipped)
+                arcpy.Delete_management(dsm_clipped_path)
+                mask_arr, _ = raster_2_array(mask_clipped)
+                arcpy.Delete_management(mask_clipped_path)
 
+                ## Convert non-vegetation (no data) pixels to 0
+                mask_arr[mask_arr==-9999] = 0
 
-#### TREETOP DETECTION -------------------------------------------------------------------
+                ## Denoise vegetation mask with morphological opening
+                mask_open_arr = opening(mask_arr, selem=disk(PARAMS['disk_radius']))
 
-            ## Build integer CHM for faster image processing
-            chm_raw_arr_int = chm_raw_arr * 100  ## multiply by 100 to keep 2 decimal when converting to int for rank.median()
-            chm_raw_arr_int = chm_raw_arr_int.astype(np.uint16)
-            chm_median_arr = rank.median(chm_raw_arr_int, disk(2))  ## denoises image to avoid high values for trees whose treetop is close to high buildings
+                ## Fill holes in vegetation mask
+                mask_open_filled_arr = binary_fill_holes(mask_open_arr).astype(int)
 
-            ## Compute opening image
-            chm_open_arr = opening(chm_median_arr, selem=disk(PARAMS['disk_radius']))
+                ## Build raw CHM (the one height values must be read from) by masking out non-vegetation DSM pixels and pixels lower than a height threshold
+                chm_raw_arr = dsm_arr * mask_open_filled_arr
+                chm_raw_arr[chm_raw_arr < PARAMS['ht_thresh']] = 0   ## sets to 0 pixels lower than threshold and -9999 at the borders
 
-            ## Compute opening by reconstruction image with opening image as seed and CHM as mask
-            chm_reconstr_arr = reconstruction(seed=chm_open_arr, mask=chm_median_arr, method='dilation', selem=disk(PARAMS['disk_radius']))
-            if PARAMS['write_files']:
-                chm_reconstr = array_2_raster(chm_reconstr_arr, spatial_info)
-                arcpy.RasterToASCII_conversion(chm_reconstr, os.path.join(tile_final_dir, tile_name+'_'+PARAMS['gr_names_keys']['CHMsegments']+'.asc'))
+                if PARAMS['plot_figures']:
+                    plt.figure(), plt.title('Veg. mask'), plt.imshow(mask_arr), plt.colorbar()
+                    plt.figure(), plt.title('Veg. mask opened'), plt.imshow(mask_open_arr), plt.colorbar()
+                    plt.figure(), plt.title('Veg. mask opened and filled'), plt.imshow(mask_open_filled_arr), plt.colorbar()
+                    plt.figure(), plt.title('CHM raw'), plt.imshow(chm_raw_arr), plt.colorbar()
 
-            ## Detect local maxima regions on opening by reconstruction CHM: results in flat tree tops and no noise
-            local_max_flat_arr = peak_local_max(chm_reconstr_arr, min_distance=PARAMS['min_distance_peaks'], indices=False)  ## with indices=False, the output is a boolean matrix
+                if PARAMS['write_files']:
+                    chm_raw = array_2_raster(chm_raw_arr, spatial_info)
+                    arcpy.RasterToASCII_conversion(chm_raw, chm_raw_path)
+                    mask_open_filled_towrite_arr = np.copy(mask_open_filled_arr)
+                    mask_open_filled_towrite_arr[mask_open_filled_towrite_arr == 0] = -9999
+                    mask_open_filled_towrite = array_2_raster(mask_open_filled_towrite_arr, spatial_info)
+                    arcpy.RasterToASCII_conversion(mask_open_filled_towrite, os.path.join(tile_mask_dir, tile_name + '_' + PARAMS['gr_names_keys']['VegMaskFilled'] + '.asc'))
 
-            ## Detect local maxima on median filtered CHM: results in true tree tops but with noise
-            local_max_raw_arr = corner_peaks(chm_median_arr, min_distance=PARAMS['min_distance_peaks'], indices=False)  ## corner_peaks() respects the min_distance criterion, instead peak_local_max() does not
+            else:
 
-            ## Keep only true treetops in within flat tops
-            local_max_arr = local_max_flat_arr * local_max_raw_arr
+                if os.path.exists(chm_raw_path):
+                    chm_raw = arcpy.Raster(chm_raw_path)
+                    chm_raw_arr, spatial_info = raster_2_array(chm_raw)
 
-            if PARAMS['plot_figures']:
-                plt.figure(), plt.title('CHM median filtered'), plt.imshow(chm_median_arr), plt.colorbar()
-                plt.figure(), plt.title('CHM opened'), plt.imshow(chm_open_arr), plt.colorbar()
-                plt.figure(), plt.title('CHM opened by reconstr.'), plt.imshow(chm_reconstr_arr), plt.colorbar()
-                plt.figure(), plt.title('Local max flat'), plt.imshow(local_max_flat_arr), plt.colorbar()
-                plt.figure(), plt.title('Local max raw'), plt.imshow(dilation(local_max_raw_arr, selem=disk(2))), plt.colorbar()
-                plt.figure(), plt.title('Local max'), plt.imshow(dilation(local_max_arr, selem=disk(2))), plt.colorbar()
+            #### TREETOP DETECTION -------------------------------------------------------------------
 
-            if PARAMS['write_files']:
-                local_max_visual = array_2_raster(dilation(local_max_arr, selem=disk(2)).astype(int), spatial_info)
-                arcpy.RasterToASCII_conversion(local_max_visual, os.path.join(tile_final_dir, tile_name+'_tree_tops.asc'))
+            if PARAMS['segment_crowns']:
 
-            ## Watershed segmentation
-            chm_reconstr_arr_int = chm_reconstr_arr.astype(np.uint16)  ## recast as integer the input to watershed() has to be an int image
-            gradient_arr = rank.gradient(chm_reconstr_arr_int, selem=disk(1))     ## compute gradient image with very thin edges (disk(1))
-            markers_arr = local_max_arr.astype(int)
-            markers_arr[local_max_arr] = np.arange(1, sum(sum(local_max_arr)) + 1)  # equivalent to the following but without repeated labels for contiguous pixels: ndi.label(local_max_arr.astype(int))[0]  ## assign unique labels to each marker to start the segmentation (same labels will be assigned to segments)
-            markers_dilat_arr = dilation(markers_arr, selem=disk(1))  ## thicken markers with a disk of size 2 to avoid problems if local max is at the edge
-            segments_arr = watershed(image=gradient_arr, markers=markers_dilat_arr, mask=mask_open_filled_arr, compactness=PARAMS['compactness'])
+                ## Build integer CHM for faster image processing
+                chm_raw_arr_int = chm_raw_arr * 100  ## multiply by 100 to keep 2 decimal when converting to int for rank.median()
+                chm_raw_arr_int = chm_raw_arr_int.astype(np.uint16)
+                chm_median_arr = rank.median(chm_raw_arr_int, disk(2))  ## denoises image to avoid high values for trees whose treetop is close to high buildings
 
-            if PARAMS['plot_figures']:
-                plt.figure(), plt.title('CHM reconstr'), plt.imshow(chm_reconstr_arr_int), plt.colorbar()
-                plt.figure(), plt.title('Markers'), plt.imshow(dilation(markers_arr), cmap='prism'), plt.colorbar()
-                plt.figure(), plt.title('Gradient'), plt.imshow(gradient_arr), plt.colorbar()
-                plt.figure(), plt.title('Segments'), plt.imshow(segments_arr, cmap='prism'), plt.colorbar()
+                ## Compute opening image
+                chm_open_arr = opening(chm_median_arr, selem=disk(PARAMS['disk_radius']))
 
-            ## Convert raster segments to shp
-            segments = array_2_raster(segments_arr, spatial_info)
-            segment_raster_path = os.path.join(tile_segmented_dir, tile_name + '_segments_img.asc')
-            arcpy.RasterToASCII_conversion(segments, segment_raster_path)
-            segments_shp_path = os.path.join(tile_segmented_dir, tile_name + '_' + PARAMS['gr_names_keys']['TreeCrown'] + '.shp')
-            arcpy.RasterToPolygon_conversion(segments, segments_shp_path, 'NO_SIMPLIFY')
-            arcpy.DefineProjection_management(segments_shp_path, arcpy.SpatialReference("NAD 1983 UTM Zone 10N"))
+                ## Compute opening by reconstruction image with opening image as seed and CHM as mask
+                chm_reconstr_arr = reconstruction(seed=chm_open_arr, mask=chm_median_arr, method='dilation', selem=disk(PARAMS['disk_radius']))
+                if PARAMS['write_files']:
+                    chm_reconstr = array_2_raster(chm_reconstr_arr, spatial_info)
+                    arcpy.RasterToASCII_conversion(chm_reconstr, os.path.join(tile_chm_treetops_dir, tile_name+'_'+PARAMS['gr_names_keys']['CHMsegments']+'.asc'))
 
-            ## Compute area for each tree crown
-            arcpy.AddField_management(segments_shp_path, "Shape_area", "DOUBLE")
-            exp = "!SHAPE.AREA@SQUAREMETERS!"
-            arcpy.CalculateField_management(segments_shp_path, "Shape_area", exp, "PYTHON_9.3")
+                ## Detect local maxima regions on opening by reconstruction CHM: results in flat tree tops and no noise
+                local_max_flat_arr = peak_local_max(chm_reconstr_arr, min_distance=PARAMS['min_distance_peaks'], indices=False)  ## with indices=False, the output is a boolean matrix
 
-            ## Compute segment centroids
-            arcpy.AddField_management(segments_shp_path, 'X_coord', "DOUBLE", field_precision=11, field_scale=3)  ## if precision is greater than 6, we have to use "DOUBLE"
-            arcpy.AddField_management(segments_shp_path, 'Y_coord', "DOUBLE", field_precision=11, field_scale=3)
-            arcpy.CalculateField_management(segments_shp_path, 'X_coord', "!SHAPE.CENTROID.X!", "PYTHON_9.3")
-            arcpy.CalculateField_management(segments_shp_path, 'Y_coord', "!SHAPE.CENTROID.Y!", "PYTHON_9.3")
+                ## Detect local maxima on median filtered CHM: results in true tree tops but with noise
+                local_max_raw_arr = corner_peaks(chm_median_arr, min_distance=PARAMS['min_distance_peaks'], indices=False)  ## corner_peaks() respects the min_distance criterion, instead peak_local_max() does not
 
-            ## Read attribute table to pandas and add crown diameter
-            attr_table_df = pd.DataFrame.from_records(arcpy.da.FeatureClassToNumPyArray(segments_shp_path, ('ID', 'GRIDCODE', 'Shape_area')))
-            attr_table_df['Crown_dm'] = np.sqrt(attr_table_df['Shape_area']/np.pi) * 2   ## diameter in m of a circle of same are of the current polygon
+                ## Keep only true treetops in within flat tops
+                local_max_arr = local_max_flat_arr * local_max_raw_arr
 
-            ## Retrieve height of treetop within crown
-            seg_label_tree_ht_df = pd.DataFrame({'GRIDCODE':markers_arr[local_max_arr], 'Tree_ht':chm_raw_arr[local_max_arr]})  ## Read Tree heigth values from CHM with real values (chm_raw_arr), local_max_arr is the boolean matrix with treetops
-            attr_table_df = pd.merge(attr_table_df, seg_label_tree_ht_df, on='GRIDCODE', how='inner')         ## the order of polygons and pixels is already the same for safety reasons we merge the two df based on the segment label
+                if PARAMS['plot_figures']:
+                    plt.figure(), plt.title('CHM median filtered'), plt.imshow(chm_median_arr), plt.colorbar()
+                    plt.figure(), plt.title('CHM opened'), plt.imshow(chm_open_arr), plt.colorbar()
+                    plt.figure(), plt.title('CHM opened by reconstr.'), plt.imshow(chm_reconstr_arr), plt.colorbar()
+                    plt.figure(), plt.title('Local max flat'), plt.imshow(local_max_flat_arr), plt.colorbar()
+                    plt.figure(), plt.title('Local max raw'), plt.imshow(dilation(local_max_raw_arr, selem=disk(2))), plt.colorbar()
+                    plt.figure(), plt.title('Local max'), plt.imshow(dilation(local_max_arr, selem=disk(2))), plt.colorbar()
 
-            ## Add empty fields to attribute table
-            fields = ['Tree_ht', 'Crown_dm']
-            for field in fields:
-                arcpy.AddField_management(segments_shp_path, field, "FLOAT", field_precision=5, field_scale=2)
+                if PARAMS['write_files']:
+                    local_max_visual = array_2_raster(dilation(local_max_arr, selem=disk(2)).astype(int), spatial_info)
+                    arcpy.RasterToASCII_conversion(local_max_visual, os.path.join(tile_chm_treetops_dir, tile_name+'_tree_tops.asc'))
 
-            ## Update the two new fields of attribute table
-            if attr_table_df.shape[0] > 0:
-                with arcpy.da.UpdateCursor(segments_shp_path, fields) as cursor:   ## Create update cursor for feature class
-                    for irow, row in enumerate(cursor):
-                        for icol, field in enumerate(fields):
-                            row[icol] = attr_table_df[field][irow]
-                        cursor.updateRow(row)
+                ## Watershed segmentation
+                chm_reconstr_arr_int = chm_reconstr_arr.astype(np.uint16)  ## recast as integer the input to watershed() has to be an int image
+                gradient_arr = rank.gradient(chm_reconstr_arr_int, selem=disk(1))     ## compute gradient image with very thin edges (disk(1))
+                markers_arr = local_max_arr.astype(int)
+                markers_arr[local_max_arr] = np.arange(1, sum(sum(local_max_arr)) + 1)  # equivalent to the following but without repeated labels for contiguous pixels: ndi.label(local_max_arr.astype(int))[0]  ## assign unique labels to each marker to start the segmentation (same labels will be assigned to segments)
+                markers_dilat_arr = dilation(markers_arr, selem=disk(1))  ## thicken markers with a disk of size 2 to avoid problems if local max is at the edge
+                segments_arr = watershed(image=gradient_arr, markers=markers_dilat_arr, mask=mask_open_filled_arr)
+
+                if PARAMS['plot_figures']:
+                    plt.figure(), plt.title('CHM reconstr'), plt.imshow(chm_reconstr_arr_int), plt.colorbar()
+                    plt.figure(), plt.title('Markers'), plt.imshow(dilation(markers_arr), cmap='prism'), plt.colorbar()
+                    plt.figure(), plt.title('Gradient'), plt.imshow(gradient_arr), plt.colorbar()
+                    plt.figure(), plt.title('Segments'), plt.imshow(segments_arr, cmap='prism'), plt.colorbar()
+
+                ## Convert raster segments to shp
+                segments = array_2_raster(segments_arr, spatial_info)
+                segment_raster_path = os.path.join(tile_segmented_dir, tile_name + '_segments_img.asc')
+                arcpy.RasterToASCII_conversion(segments, segment_raster_path)
+                segments_shp_path = os.path.join(tile_segmented_dir, tile_name + '_' + PARAMS['gr_names_keys']['TreeCrown'] + '.shp')
+                arcpy.RasterToPolygon_conversion(segments, segments_shp_path, 'NO_SIMPLIFY')
+
+                ## Delete segments with gridcode = 0 (small border polygons)
+                uc = arcpy.UpdateCursor(segments_shp_path, "gridcode=0", arcpy.Describe(segments_shp_path).spatialReference)
+                for row in uc:
+                    uc.deleteRow(row)
+
+                ## Assign projection
+                arcpy.DefineProjection_management(segments_shp_path, arcpy.SpatialReference("NAD 1983 UTM Zone 10N"))
+
+                ## Compute area for each tree crown
+                arcpy.AddField_management(segments_shp_path, "Shape_area", "DOUBLE")
+                exp = "!SHAPE.AREA@SQUAREMETERS!"
+                arcpy.CalculateField_management(segments_shp_path, "Shape_area", exp, "PYTHON_9.3")
+
+                ## Compute segment centroids
+                arcpy.AddField_management(segments_shp_path, 'X_coord', "DOUBLE", field_precision=11, field_scale=3)  ## if precision is greater than 6, we have to use "DOUBLE"
+                arcpy.AddField_management(segments_shp_path, 'Y_coord', "DOUBLE", field_precision=11, field_scale=3)
+                arcpy.CalculateField_management(segments_shp_path, 'X_coord', "!SHAPE.CENTROID.X!", "PYTHON_9.3")
+                arcpy.CalculateField_management(segments_shp_path, 'Y_coord', "!SHAPE.CENTROID.Y!", "PYTHON_9.3")
+
+                ## Read attribute table to pandas and add crown diameter
+                attr_table_df = pd.DataFrame.from_records(arcpy.da.FeatureClassToNumPyArray(segments_shp_path, ('ID', 'GRIDCODE', 'Shape_area')))
+                attr_table_df['Crown_dm'] = np.sqrt(attr_table_df['Shape_area']/np.pi) * 2   ## diameter in m of a circle of same are of the current polygon
+
+                ## Retrieve height of treetop within crown
+                seg_label_tree_ht_df = pd.DataFrame({'GRIDCODE':markers_arr[local_max_arr], 'Tree_ht':chm_raw_arr[local_max_arr]})  ## Read Tree heigth values from CHM with real values (chm_raw_arr), local_max_arr is the boolean matrix with treetops
+                attr_table_df = pd.merge(attr_table_df, seg_label_tree_ht_df, on='GRIDCODE', how='inner')         ## the order of polygons and pixels is already the same for safety reasons we merge the two df based on the segment label
+
+                ## Add empty fields to attribute table
+                fields = ['Tree_ht', 'Crown_dm']
+                for field in fields:
+                    arcpy.AddField_management(segments_shp_path, field, "FLOAT", field_precision=5, field_scale=2)
+
+                ## Update the two new fields of attribute table
+                if attr_table_df.shape[0] > 0:
+                    with arcpy.da.UpdateCursor(segments_shp_path, fields) as cursor:   ## Create update cursor for feature class
+                        for irow, row in enumerate(cursor):
+                            for icol, field in enumerate(fields):
+                                row[icol] = attr_table_df[field][irow]
+                            cursor.updateRow(row)
+
+                ## Create temporary shps: frame.shp will be the result
+                temp_bounding_box_path = os.path.join(arcgis_temp_dir, "bounding_box.shp")
+                temp_bounding_box_small_path = os.path.join(arcgis_temp_dir, "bounding_box_small.shp")
+                temp_frame_path = os.path.join(arcgis_temp_dir, "frame.shp")
+
+                ## Create difference of tile bounding box and inwards buffered tile bounding box
+                arcpy.MakeFeatureLayer_management(segments_shp_path, "seg_lyr")  ## make a layer from the feature class
+                arcpy.MinimumBoundingGeometry_management("seg_lyr", temp_bounding_box_path, "ENVELOPE", "ALL")
+                arcpy.Buffer_analysis(temp_bounding_box_path, temp_bounding_box_small_path, -2)
+                arcpy.SymDiff_analysis(temp_bounding_box_path, temp_bounding_box_small_path, temp_frame_path)
+
+                ## Select polygons intersecting this frame to remove boundary segments
+                arcpy.SelectLayerByLocation_management(in_layer="seg_lyr", overlap_type="INTERSECT",
+                                                       select_features=temp_frame_path)
+
+                ## Use a SQL query to select segments larger than a certain threshold to remove background polygon
+                ## and segments associated with trees smaller than a threshold
+                arcpy.SelectLayerByAttribute_management(in_layer_or_view="seg_lyr",
+                                                        selection_type="ADD_TO_SELECTION",
+                                                        where_clause=' "Crown_dm" >= %d OR "Tree_ht" < %d ' % (PARAMS[
+                                                            'crown_dm_thresh'], PARAMS['tree_ht_thresh']))
+
+                ## Delete selected polygons from final layer
+                arcpy.DeleteFeatures_management("seg_lyr")
 
 
 #### LOAD LAYERS INTO MXD PROJECT -------------------------------------------------------------------
 
-    print("Loading layers into MXD")
+    if PARAMS['build_MXD']:
 
-    ## Get MXD and dataframe
-    mxd = arcpy.mapping.MapDocument(PARAMS['input_mxd'])
-    df = arcpy.mapping.ListDataFrames(mxd)[0]  ## assuming there is only 1 df (called Layer, the default)
-    mxd.activeView = df.name
-    mxd.title = df.name
+        print("Loading layers into MXD")
 
-    ## Loop over the tiles in tile_final_dir
-    layer_paths = glob.glob(os.path.join(tile_mask_dir, '*_'+PARAMS['gr_names_keys']['VegMaskRaw']+'.asc'))
-    layer_paths.extend(glob.glob(os.path.join(tile_mask_dir, '*_'+PARAMS['gr_names_keys']['VegMaskFilled']+'.asc')))
-    layer_paths.extend(glob.glob(os.path.join(tile_final_dir, '*_'+PARAMS['gr_names_keys']['CHMtreeTops']+'.asc')))
-    layer_paths.extend(glob.glob(os.path.join(tile_final_dir, '*_'+PARAMS['gr_names_keys']['CHMsegments']+'.asc')))
-    layer_paths.extend(glob.glob(os.path.join(tile_final_dir,'*_'+PARAMS['gr_names_keys']['TreeTop']+'.asc')))
-    layer_paths.extend(glob.glob(os.path.join(tile_segmented_dir, '*_'+PARAMS['gr_names_keys']['TreeCrown']+'.shp')))
-    for layer_path in layer_paths:
-        
-        layer_to_add = arcpy.mapping.Layer(layer_path)
-        arcpy.mapping.AddLayer(df, layer_to_add, "TOP")
+        ## Get MXD and dataframe
+        mxd = arcpy.mapping.MapDocument(PARAMS['input_mxd'])
+        df = arcpy.mapping.ListDataFrames(mxd)[0]  ## assuming there is only 1 df (called Layer, the default)
+        mxd.activeView = df.name
+        mxd.title = df.name
 
-        if PARAMS['gr_names_keys']['TreeTop'] in layer_path:
-            source_lyr_path = os.path.join(PARAMS['base_dir'], 'mxds', 'lyrs', r'detected_treetops.lyr')
-        elif PARAMS['gr_names_keys']['CHMtreeTops'] in layer_path:
-            source_lyr_path = os.path.join(PARAMS['base_dir'], 'mxds', 'lyrs', r'chm_2_60.lyr')
-        elif PARAMS['gr_names_keys']['CHMsegments'] in layer_path:
-            source_lyr_path = os.path.join(PARAMS['base_dir'], 'mxds', 'lyrs', r'chm_segments_200_6000.lyr')
-        elif PARAMS['gr_names_keys']['VegMaskRaw'] in layer_path or PARAMS['gr_names_keys']['VegMaskFilled'] in layer_path:
-            source_lyr_path = os.path.join(PARAMS['base_dir'], 'mxds', 'lyrs', r'vegetation_mask.lyr')
-        elif PARAMS['gr_names_keys']['TreeCrown'] in layer_path:
-            source_lyr_path = os.path.join(PARAMS['base_dir'], 'mxds', 'lyrs', r'segments_polyg.lyr')
+        ## Loop over the tiles in tile_chm_treetops_dir
+        layer_paths = glob.glob(os.path.join(tile_mask_dir, '*_'+PARAMS['gr_names_keys']['VegMaskFilled']+'.asc'))   ## we do not plot VegMaskRaw anymore
+        layer_paths.extend(glob.glob(os.path.join(tile_chm_treetops_dir, '*_'+PARAMS['gr_names_keys']['CHMtreeTops']+'.asc')))
+        layer_paths.extend(glob.glob(os.path.join(tile_chm_treetops_dir, '*_'+PARAMS['gr_names_keys']['CHMsegments']+'.asc')))
+        layer_paths.extend(glob.glob(os.path.join(tile_chm_treetops_dir,'*_'+PARAMS['gr_names_keys']['TreeTop']+'.asc')))
+        layer_paths.extend(glob.glob(os.path.join(tile_segmented_dir, '*_'+PARAMS['gr_names_keys']['TreeCrown']+'.shp')))
+        for i_layer, layer_path in enumerate(layer_paths):
 
-        source_lyr = arcpy.mapping.Layer(source_lyr_path)
-        layer_to_update = arcpy.mapping.ListLayers(mxd, layer_to_add.name, df)[0]  ## redefine layer_to_update as an arcpy object
-        arcpy.ApplySymbologyFromLayer_management(layer_to_update, source_lyr)  ## first apply the symbology with ApplySymbologyFromLayer_management (needs a path to the layer providing the symbology)
-        arcpy.mapping.UpdateLayer(df, layer_to_update, source_lyr, True)  ## update symbology by using the one of source_lyr (has to be an arpy object and not just the path)
+            layer_to_add = arcpy.mapping.Layer(layer_path)
+            arcpy.mapping.AddLayer(df, layer_to_add, "TOP")
 
-    ## Grouping layers
-    positions = ['TOP'] * len(PARAMS['gr_names_keys'])
-    grouping_dict = {n:[PARAMS['gr_names_keys'][n], positions[i]] for i, n in enumerate(PARAMS['gr_names_keys'])}
-    group_arcmap_layers(mxd, df, os.path.join(PARAMS['base_dir'], 'mxds', 'lyrs', r'NewGroupLayer.lyr'), grouping_dict)
+            if PARAMS['gr_names_keys']['TreeTop'] in layer_path:
+                source_lyr_path = os.path.join(PARAMS['base_dir'], 'mxds', 'lyrs', r'detected_treetops.lyr')
+            elif PARAMS['gr_names_keys']['CHMtreeTops'] in layer_path:
+                arcpy.BuildPyramids_management(layer_path, skip_existing="SKIP_EXISTING")  ## do not create pyramids if they already exist
+                source_lyr_path = os.path.join(PARAMS['base_dir'], 'mxds', 'lyrs', r'chm_2_60.lyr')
+            elif PARAMS['gr_names_keys']['CHMsegments'] in layer_path:
+                arcpy.BuildPyramids_management(layer_path, skip_existing="SKIP_EXISTING")  ## do not create pyramids if they already exist
+                source_lyr_path = os.path.join(PARAMS['base_dir'], 'mxds', 'lyrs', r'chm_segments_200_6000.lyr')
+            elif PARAMS['gr_names_keys']['VegMaskRaw'] in layer_path or PARAMS['gr_names_keys']['VegMaskFilled'] in layer_path:
+                arcpy.BuildPyramids_management(layer_path, skip_existing="SKIP_EXISTING")  ## do not create pyramids if they already exist
+                source_lyr_path = os.path.join(PARAMS['base_dir'], 'mxds', 'lyrs', r'vegetation_mask.lyr')
+            elif PARAMS['gr_names_keys']['TreeCrown'] in layer_path:
+                source_lyr_path = os.path.join(PARAMS['base_dir'], 'mxds', 'lyrs', r'segments_polyg.lyr')
 
-    ## Saving final MXD
-    mxd.saveACopy(PARAMS['output_mxd'])
+            source_lyr = arcpy.mapping.Layer(source_lyr_path)
+            layer_to_update = arcpy.mapping.ListLayers(mxd, layer_to_add.name, df)[0]  ## redefine layer_to_update as an arcpy object
+            arcpy.ApplySymbologyFromLayer_management(layer_to_update, source_lyr)  ## first apply the symbology with ApplySymbologyFromLayer_management (needs a path to the layer providing the symbology)
+            arcpy.mapping.UpdateLayer(df, layer_to_update, source_lyr, True)  ## update symbology by using the one of source_lyr (has to be an arpy object and not just the path)
 
-    # if os.path.exists(arcgis_temp_dir):
-    #     shutil.rmtree(arcgis_temp_dir)
+        ## Grouping layers
+        positions = ['TOP'] * len(PARAMS['gr_names_keys'])
+        grouping_dict = {n:[PARAMS['gr_names_keys'][n], positions[i]] for i, n in enumerate(PARAMS['gr_names_keys'])}
+        group_arcmap_layers(mxd, df, os.path.join(PARAMS['base_dir'], 'mxds', 'lyrs', r'NewGroupLayer.lyr'), grouping_dict)
+
+        ## Saving final MXD
+        mxd.saveACopy(PARAMS['output_mxd'])
 
     print('Total ' + toc(start_time))
 
 
 
+## MAYBE TO USE
 
+# XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+# import rpy2.robjects as robjects
 
+# robjects.r('''
+#         library(ForestTools)
+#         library(raster)
+#         aa <- c(0, 4, 6)
+#         ''')
+#
+# not working
+# XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 
 ## PARAMETERS OF OTHER UNUSED FUNCTIONS
 # PARAMS['filter_above'] = 120         ## parameter for lasheight() to remove points above a threshold in m
@@ -544,6 +576,28 @@ if __name__ == '__main__':
 # plt.colorbar()
 
 
+# ## Use lasgrid as a mosaicking tool: action='mosaic' takes the highest pixel value, to avoid zero pixels at boundary of DSMs ending up in mosaic
+# if PARAMS['write_files']:
+#     lasgrid(in_dir=tile_dem_dir, key='*PF_DSM*', out_dir=PARAMS['wkg_dir'],
+#             out_name=('PF_CHM_fdist%0.2f' % PARAMS['freeze_dist']).replace('.', 'p'),
+#             step=PARAMS['step'], action='mosaic', nr_MB_mem=2000, in_ext='asc', verbose=True)
+#     filelist = glob.glob(os.path.join(tile_dem_dir, '*.asc'))
+#     for f in filelist:
+#         os.remove(f)
+
+# ## DTM
+# las2dem(in_dir=tile_laz_dir, in_ext='laz', DEM_type='DTM', step=PARAMS['step'],
+#         out_dir=tile_dem_dir, hillshaded=False,
+#         buffer_mode=PARAMS['buffer_mode_las2dem'],
+#         nr_cores=PARAMS['nr_cores'], verbose=True)
+
+# if PARAMS['write_files']:
+#     lasgrid(in_dir=tile_dem_dir, key='*DTM*', out_dir=PARAMS['wkg_dir'], out_name='DTM_full',
+#             step=PARAMS['step'], action='mosaic', nr_MB_mem=2000, in_ext='asc', verbose=True)
+#     filelist = glob.glob(os.path.join(tile_dem_dir, '*.asc'))
+#     for f in filelist:
+#         os.remove(f)
+
 ## TO CLASSIFY POINT CLOUD (NOT NEEDED AS ALREADY PROVIDED AS CLASSIFIED) -------------------------------
 
 ## Zip las files to laz
@@ -571,7 +625,7 @@ if __name__ == '__main__':
 
 # Reuse lastile to remove the buffer from the classified tiles:
 # Not needed as we never actually added buffers to the tiles
-# lastile(in_dir=tile_classif_dir, in_ext='laz', out_dir=tile_final_dir,
+# lastile(in_dir=tile_classif_dir, in_ext='laz', out_dir=tile_chm_treetops_dir,
 #         tile_buffer='remove', nr_cores=PARAMS['nr_cores'], verbose=True)
 
 
