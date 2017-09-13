@@ -58,9 +58,21 @@ if __name__ == '__main__':
 
     PARAMS['base_dir'] = r'D:\Research\ANALYSES\BigTreesVan'
 
-    PARAMS['experiment_name'] = '0p3m_PF_CHM_minDistpeaks_7'
+    # PARAMS['dataset_name'] = 'Tune_alg_8tiles'
+    # PARAMS['experiment_name'] = 'step_0p3m_radius_4'
+    # PARAMS['experiment_name'] = 'step_0p5m_radius_2'
+    # PARAMS['experiment_name'] = 'step_0p5m_radius_4'
+    # PARAMS['experiment_name'] = 'step_0p3m_radius_6'
+    # PARAMS['experiment_name'] = 'step_0p5m_radius_6'
+    # PARAMS['experiment_name'] = 'step_1m_radius_4'
+    # PARAMS['experiment_name'] = 'step_0p4m_radius_5'
+    # PARAMS['experiment_name'] = 'step_0p4m_radius_4'
+    # PARAMS['experiment_name'] = 'step_0p4m_radius_6'
+    # PARAMS['experiment_name'] = 'step_0p3m_radius_10'
+    # PARAMS['experiment_name'] = 'step_0p3m_radius_8_nofill'
 
-    PARAMS['dataset_name'] = 'tune_alg_10tiles'
+    PARAMS['dataset_name'] = 'Vancouver_500m_tiles'
+    PARAMS['experiment_name'] = 'step_0p3m_radius_8'
 
     #### TO LAZ and remove unzipped las
     # PARAMS['data_dir'] = os.path.join(PARAMS['base_dir'], r'E:\BigTreesVan_data')
@@ -73,7 +85,7 @@ if __name__ == '__main__':
     PARAMS['exp_dir'] = os.path.join(PARAMS['wkg_dir'], PARAMS['dataset_name'], PARAMS['experiment_name'])
 
     PARAMS['ht_filter_colname'] = 'appr_ht'   ## name of column containing the approximate height for reference trees (extracted by overlaying CHM and tree location)
-    PARAMS['ref_tree_thresh'] = 10   ## height threshold in meters below which we remove reference trees
+    PARAMS['ref_tree_thresh'] = 15   ## height threshold in meters below which we remove reference trees
 
     PARAMS['pred_ht_colname'] = 'Tree_ht'  ## name of column containing the predicted height for all trees
     PARAMS['obs_ht_colname'] = 'avg_ht'    ## name of column containing the observed height for reference trees

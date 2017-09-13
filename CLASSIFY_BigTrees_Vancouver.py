@@ -53,12 +53,14 @@ if __name__ == '__main__':
 
     PARAMS = {}
 
-    PARAMS['lidar_preprocessing'] = True  ## whether or not to run the sorting and indexing of the tiles
-    # PARAMS['lidar_preprocessing'] = False
+    # PARAMS['lidar_preprocessing'] = True  ## whether or not to run the sorting and indexing of the tiles
+    PARAMS['lidar_preprocessing'] = False
 
-    PARAMS['build_dataset'] = True
+    # PARAMS['build_dataset'] = True
+    PARAMS['build_dataset'] = False
 
-    PARAMS['train_rf_model'] = True
+    # PARAMS['train_rf_model'] = True
+    PARAMS['train_rf_model'] = False
 
     PARAMS['predict_on_tiles'] = True
 
@@ -70,7 +72,7 @@ if __name__ == '__main__':
 
     PARAMS['dataset_name'] = 'tune_alg_10tiles'
 
-    PARAMS['output_mxd'] = os.path.join(PARAMS['base_dir'], 'mxds', r'VanBigTrees_'+PARAMS['dataset_name']+'_'+PARAMS['experiment_name']+'.mxd')   ## path to final mxd to save results
+    PARAMS['output_mxd'] = os.path.join(PARAMS['exp_dir'], r'VanBigTrees_'+PARAMS['dataset_name']+'_'+PARAMS['experiment_name']+'.mxd')   ## path to final mxd to save results
 
     #### TO LAZ and remove unzipped las
     # PARAMS['data_dir'] = os.path.join(PARAMS['base_dir'], r'E:\BigTreesVan_data')
@@ -83,7 +85,7 @@ if __name__ == '__main__':
     PARAMS['ref_trees_path'] = r'E:\BigTreesVan_data\GroundTruth\reference_trees.shp'
 
     PARAMS['ht_filter_colname'] = 'Tree_ht'   ## column name containing the predicted height of reference trees
-    PARAMS['ref_tree_thresh'] = 10   ## height threshold in meters below which we remove reference trees
+    PARAMS['ref_tree_thresh'] = 15   ## height threshold in meters below which we remove reference trees
 
     PARAMS['train_pct'] = 0.60    ## percentage of samples being assigned to the training set
 
@@ -242,6 +244,7 @@ if __name__ == '__main__':
     print('Training & testing RF')
 
     ## Build training and test sets
+    np.random.seed(2013)
     classif_df['is_train'] = np.random.uniform(0, 1, len(classif_df)) <= PARAMS['train_pct']
     train, test = classif_df[classif_df['is_train'] == True].dropna(), classif_df[classif_df['is_train'] == False].dropna()
     labels_name = 'CONIFEROUS'
@@ -310,13 +313,16 @@ if __name__ == '__main__':
 
             segments_classified_path = os.path.join(tile_classified_dir, tile_name + '_segments_classif.shp')
             segments_df = Dbf5(segments_classified_path.replace('shp', 'dbf')).to_dataframe()
+            if 'Pred_Conif' in segments_df.columns:
+                segments_df = segments_df.drop('Pred_Conif', axis=1)
 
             df_rel_tile = lidar_metric_df[PARAMS['to_normalize']].div(lidar_metric_df['p99'], axis=0)
             df_rel_tile.columns = ['rel_' + str for str in PARAMS['to_normalize']]
             lidar_metric_df = pd.concat([lidar_metric_df, df_rel_tile], axis=1)
 
             x_tile = lidar_metric_df[PARAMS['feature_names']]
-            ok_idx = pd.notnull(x_tile).any(1)
+            ok_idx = pd.notnull(x_tile).any(1) & ~np.isnan(x_tile).any(1)
+
             lidar_metric_df['Pred_Conif'] = ''
             lidar_metric_df.loc[ok_idx, 'Pred_Conif'] = rf.predict(x_tile.loc[ok_idx])
             lidar_metric_df['Pred_Conif'] = np.where(lidar_metric_df['Pred_Conif'], 'Y', 'N')
@@ -325,6 +331,8 @@ if __name__ == '__main__':
             ## Add empty fields to attribute table
             fields = ['Pred_Conif']
             for field in fields:
+                if field in [f.name for f in arcpy.ListFields(segments_classified_path)]:
+                    arcpy.DeleteField_management(segments_classified_path, field)
                 arcpy.AddField_management(segments_classified_path, field, "TEXT", field_length=1)
 
             ## Update the Pred_Conif new fields of attribute table
@@ -376,15 +384,6 @@ if __name__ == '__main__':
 
 
     print('Total ' + toc(start_time))
-
-
-
-
-
-
-## MAYBE USEFUL -------------------
-
-
 
 
 
