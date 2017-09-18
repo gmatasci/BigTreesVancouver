@@ -58,7 +58,9 @@ if __name__ == '__main__':
 
     PARAMS['base_dir'] = r'D:\Research\ANALYSES\BigTreesVan'
 
-    # PARAMS['dataset_name'] = 'Tune_alg_8tiles'
+    PARAMS['dataset_name'] = 'Tune_alg_8tiles'
+    PARAMS['experiment_name'] = 'step_0p3m_mindist_8_grad_chm_reconstr'
+
     # PARAMS['experiment_name'] = 'step_0p3m_radius_4'
     # PARAMS['experiment_name'] = 'step_0p5m_radius_2'
     # PARAMS['experiment_name'] = 'step_0p5m_radius_4'
@@ -71,13 +73,8 @@ if __name__ == '__main__':
     # PARAMS['experiment_name'] = 'step_0p3m_radius_10'
     # PARAMS['experiment_name'] = 'step_0p3m_radius_8_nofill'
 
-    PARAMS['dataset_name'] = 'Vancouver_500m_tiles'
-    PARAMS['experiment_name'] = 'step_0p3m_radius_8'
-
-    #### TO LAZ and remove unzipped las
-    # PARAMS['data_dir'] = os.path.join(PARAMS['base_dir'], r'E:\BigTreesVan_data')
-    #### TO LAZ and remove unzipped las
-    PARAMS['data_dir'] = os.path.join(PARAMS['base_dir'], r'wkg\trial_data_'+PARAMS['dataset_name'])
+    # PARAMS['dataset_name'] = 'Vancouver_500m_tiles'
+    # PARAMS['experiment_name'] = 'step_0p3m_mindist_8'
 
     PARAMS['ref_trees_path'] = r'E:\BigTreesVan_data\GroundTruth\reference_trees.shp'
 
@@ -113,18 +110,11 @@ if __name__ == '__main__':
     arcpy.env.overwriteOutput = True
 
     arcgis_temp_dir = os.path.join(PARAMS['exp_dir'], 'arcgis_temp')
-    tile_chm_treetops_dir = os.path.join(PARAMS['exp_dir'], 'tiles_chm_treetops')
     tile_segmented_dir = os.path.join(PARAMS['exp_dir'], 'tiles_segmented')
 
     ## List file paths of all tiles
-    file_key = os.path.join(tile_chm_treetops_dir, '*_chm_raw.asc')
-    chm_paths = glob.glob(file_key)
     file_key = os.path.join(tile_segmented_dir, '*_segments_polyg.shp')
     segments_paths = glob.glob(file_key)
-
-    ## Stop if different nr of tiles have been creeated
-    if len(chm_paths) != len(segments_paths):
-        sys.exit("Number of CHM tiles differs from nr of segments tiles")
 
     FN_tree_IDs = TP_tree_IDs = pd.Series(dtype=np.int)
     error_df = pd.DataFrame(columns={'seg_ID', 'TREE_ID', 'error_XY', 'error_Z', 'error_crown_dm'})
@@ -172,12 +162,7 @@ if __name__ == '__main__':
 
         ## Remove remaining TREE_ID duplicates in the tree-segment pairs
         if seg_join_df.shape[0] != len(np.unique(seg_join_df['TREE_ID'])):
-            dupl_ID = seg_join_df.loc[seg_join_df['TREE_ID'].duplicated()].values
-            ids = seg_join_df['TREE_ID']
-            dupl = seg_join_df[ids.isin(ids[ids.duplicated()])].sort(PARAMS['pred_diam_colname'])
-            seg_join_df.drop(seg_join_df['TREE_ID'] == dupl['TREE_ID'].iloc[0], inplace=True)
-            seg_join_df.append(dupl.iloc[0])
-            warnings.warn('Dropped duplicates for tile nr %d, %s' % (i_tile, tile_name))
+            seg_join_df = seg_join_df.drop_duplicates(subset='TREE_ID')
 
         ## Initialize error_df_tile df to contain error values for this tile
         unique_seg_IDs = np.unique(seg_join_df["ID"])
