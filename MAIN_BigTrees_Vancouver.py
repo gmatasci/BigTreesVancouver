@@ -9,7 +9,6 @@ Objective: Build high-res CHM from LiDAR for the city of Vancouver, detect treet
 
 ## STILL TO DO:
 
-# - grid search on key parameters
 
 # Prior to actual run:
 # - check # mask_filled
@@ -33,6 +32,7 @@ Objective: Build high-res CHM from LiDAR for the city of Vancouver, detect treet
 # - treetop finder varying with height (from R?) -- too many parameters to fit
 # - the tip of tall trees is classified as "unclassified", so vegetation mask has holes -- run LAStools classification with lasclassify
 # - running gradient on mean CHM or on raw CHM does not improve results: same elongated objects are possible (mean CHM bc is very similar to open by reconstruction mean chm, raw CHM bc too many details)
+# - big error found: watershed should be run on negative CHM (mean or raw does not change much), not on gradient. This way we avoid ugly elongated objects
 
 ## IMPORT MODULES ---------------------------------------------------------------
 
@@ -65,8 +65,8 @@ if __name__ == '__main__':
 
     PARAMS = {}
 
-    PARAMS['lidar_processing'] = True
-    # PARAMS['lidar_processing'] = False
+    # PARAMS['lidar_processing'] = True
+    PARAMS['lidar_processing'] = False
 
     PARAMS['raster_processing'] = True
     # PARAMS['raster_processing'] = False
@@ -91,17 +91,17 @@ if __name__ == '__main__':
 
     PARAMS['base_dir'] = r'D:\Research\ANALYSES\BigTreesVan'
 
-    # PARAMS['dataset_name'] = 'Vancouver_500m_tiles'
+    PARAMS['dataset_name'] = 'Vancouver_500m_tiles'
     # PARAMS['dataset_name'] = 'Tune_alg_8tiles'
-    # PARAMS['dataset_name'] = 'Tune_alg_1subtile_QE'
-    PARAMS['dataset_name'] = 'Tune_alg_1tile_QE'
+    # PARAMS['dataset_name'] = '1tile_UBC_Piotr'
+    # PARAMS['dataset_name'] = 'Tune_alg_1tile_QE'
 
-    PARAMS['experiment_name'] = 'step_0p3m_mindist_8_FINAL'
+    PARAMS['experiment_name'] = 'step_0p3m_mindist_8'
 
     #### TODO TO LAZ and remove unzipped las
-    # PARAMS['data_dir'] = r'E:\BigTreesVan_data\LiDAR\CoV\Classified_LiDAR'
+    PARAMS['data_dir'] = r'E:\BigTreesVan_data\LiDAR\CoV\Classified_LiDAR'
     #### TODO LAZ and remove unzipped las
-    PARAMS['data_dir'] = os.path.join(PARAMS['base_dir'], r'wkg\trial_data_'+PARAMS['dataset_name'])
+    # PARAMS['data_dir'] = os.path.join(PARAMS['base_dir'], r'wkg\trial_data_'+PARAMS['dataset_name'])
 
     PARAMS['wkg_dir'] = os.path.join(PARAMS['base_dir'], 'wkg')
     PARAMS['exp_dir'] = os.path.join(PARAMS['wkg_dir'], PARAMS['dataset_name'], PARAMS['experiment_name'])
@@ -112,10 +112,9 @@ if __name__ == '__main__':
     PARAMS['nr_cores'] = 32    ## number of cores to be used by lastools functions
 
     PARAMS['tile_size'] = 500      ## tile size for lidar processing with lastools (half the tile size of tiles received from City of Vancouver)
-
     PARAMS['tile_buffer'] = 30      ## tile buffer to avoid boundary problems (we expect no tree crown to be bigger than this)
 
-    PARAMS['step'] = 0.3  ## 0.3, pixel size of raster layers (DSM, CHM, masks, etc.)
+    PARAMS['step'] = 0.3   ## 0.3, pixel size of raster layers (DSM, CHM, masks, etc.)
 
     PARAMS['cell_size'] = 2    ## lasnoise parameter to remove powerlines: size in meters of each voxel of the 3x3 voxel neighborhood
     PARAMS['isolated'] = 50     ## lasnoise parameter to remove powerlines: remove points that have less neighboring points than this threshold in the 3x3 voxel neighborhood
@@ -126,7 +125,7 @@ if __name__ == '__main__':
 
     PARAMS['subcircle'] = 0.2   ## lasgrid parameter in vegetation mask to thicken point by adding a discrete ring of 8 new points that form a circle with radius "subcircle"
 
-    PARAMS['disk_radius'] = 4  ## radius of structuring element for morphological operations (opening(), reconstruction()) on vegetation mask and chm: radius of 5 means a 5*2+1 diameter disk
+    PARAMS['disk_radius'] = 4  ## radius of structuring element for morphological opening() on vegetation mask: radius of 4 means a 4*2+1= 9 pixel diameter disk
     PARAMS['min_size_holes'] = 300  ## number of contiguous 0 pixels in the vegetation mask to be filled by remove_small_holes()
 
     PARAMS['min_distance_peaks'] = 8   ## minimum separation in pixels between treetops in peak_local_max() and corner_peaks(), i.e. 4 pix = 4*0.5 = 2 m @ 0.5 m spatial resolution
@@ -134,6 +133,7 @@ if __name__ == '__main__':
     PARAMS['compactness'] = 1   ## segment compactness parameter for watershed segmentation (between 0 and 1)
 
     PARAMS['tree_ht_thresh'] = 15   ## height threshold in meters below which we remove segmented trees
+
     PARAMS['crown_dm_thresh'] = 40  ## crown diameter threshold in meters above which the polygon is no more a tree but background instead
 
     PARAMS['gr_names_keys'] = {'VegMaskRaw': 'veg_mask_raw',
@@ -163,7 +163,7 @@ if __name__ == '__main__':
     tile_laz_dir = os.path.join(PARAMS['data_dir'], 'laz')
     tile_denoised_dir = os.path.join(PARAMS['exp_dir'], 'tiles_denoised')
     tile_ht_norm_dir = os.path.join(PARAMS['exp_dir'], 'tiles_ht_norm')
-    tile_ht_norm_classif_dir = os.path.join(PARAMS['exp_dir'], 'tile_ht_norm_classif_dir')
+    tile_ht_norm_classif_dir = os.path.join(PARAMS['exp_dir'], 'tiles_ht_norm_classif_dir')
     tile_dem_dir = os.path.join(PARAMS['exp_dir'], 'tiles_dem')
     tile_mask_dir = os.path.join(PARAMS['exp_dir'], 'tiles_mask')
     tile_chm_treetops_dir = os.path.join(PARAMS['exp_dir'], 'tiles_chm_treetops')
@@ -334,13 +334,12 @@ if __name__ == '__main__':
                                 arcpy.Delete_management(file)  ## ...so delete it with Arcpy
                     continue
 
-                ## Denoise vegetation mask with morphological opening
+                ## Denoise vegetation mask with morphological opening and fill small holes
                 mask_open_arr = binary_opening(mask_arr, selem=disk(PARAMS['disk_radius']))
                 mask_filled_arr = remove_small_holes(mask_open_arr, min_size=PARAMS['min_size_holes']).astype(int)
 
                 ## Build raw CHM (the one height values must be read from) by masking out non-vegetation DSM pixels and pixels lower than a height threshold
                 chm_raw_arr = dsm_arr * mask_filled_arr
-
                 chm_raw_arr[chm_raw_arr < PARAMS['veg_ht_thresh']] = 0   ## sets to 0 pixels lower than threshold and -9999 at the borders
 
                 if PARAMS['plot_figures']:
@@ -394,18 +393,18 @@ if __name__ == '__main__':
                     local_max_visual = array_2_raster(dilation(local_max_arr, selem=disk(2)).astype(int), spatial_info)
                     arcpy.RasterToASCII_conversion(local_max_visual, os.path.join(tile_chm_treetops_dir, tile_name+'_' + PARAMS['gr_names_keys']['TreeTop'] + '.asc'))
 
-                ## Watershed segmentation
-                chm_mean_arr_int = chm_mean_arr.astype(np.uint16)  ## recast as integer the input to watershed() has to be an int image
-                gradient_arr = rank.gradient(chm_mean_arr_int, selem=disk(1))     ## compute gradient image with very thin edges (disk(1))
+                ## Prepare smoothed CHM and markers with unique labels
+                chm_mean_arr_int = chm_mean_arr.astype(np.uint16)  ## recast as integer: the input to watershed() has to be an int image
                 markers_arr = local_max_arr.astype(int)
                 markers_arr[local_max_arr] = np.arange(1, sum(sum(local_max_arr)) + 1)  ## equivalent to the following but without repeated labels for contiguous pixels: ndi.label(local_max_arr.astype(int))[0]  ## assign unique labels to each marker to start the segmentation (same labels will be assigned to segments)
                 markers_dilat_arr = dilation(markers_arr, selem=disk(1))  ## thicken markers with a disk to avoid problems if local max is at the edge
-                segments_arr = watershed(image=gradient_arr, markers=markers_dilat_arr, mask=mask_filled_arr, compactness=PARAMS['compactness'])   ## use vegetation mask as mask to avoid boundaries being drawn beyond vegetation limits
+
+                ## Watershed segmentation on negative CHM for smooth and compact segments (on gradient gives crappy elongated polygons and small isolated circles on treetop)
+                segments_arr = watershed(image=-chm_mean_arr_int, markers=markers_dilat_arr, mask=mask_filled_arr, compactness=PARAMS['compactness'])  ## use vegetation mask as mask to avoid boundaries being drawn beyond vegetation limits
 
                 if PARAMS['plot_figures']:
                     plt.figure(), plt.title('CHM mean'), plt.imshow(chm_mean_arr_int), plt.colorbar()
                     plt.figure(), plt.title('Markers'), plt.imshow(dilation(markers_arr), cmap='prism'), plt.colorbar()
-                    plt.figure(), plt.title('Gradient'), plt.imshow(gradient_arr), plt.colorbar()
                     plt.figure(), plt.title('Segments'), plt.imshow(segments_arr, cmap='prism'), plt.colorbar()
 
                 ## Convert raster segments to shp
@@ -474,8 +473,7 @@ if __name__ == '__main__':
                 ## and segments associated with trees smaller than a threshold
                 arcpy.SelectLayerByAttribute_management(in_layer_or_view="seg_lyr",
                                                         selection_type="ADD_TO_SELECTION",
-                                                        where_clause=' "Crown_dm" >= %d OR "Tree_ht" < %d ' % (PARAMS[
-                                                            'crown_dm_thresh'], PARAMS['tree_ht_thresh']))
+                                                        where_clause=' "Crown_dm" >= %d OR "Tree_ht" < %d ' % (PARAMS['crown_dm_thresh'], PARAMS['tree_ht_thresh']))
 
                 ## Delete selected polygons from final layer
                 arcpy.DeleteFeatures_management("seg_lyr")
@@ -495,8 +493,9 @@ if __name__ == '__main__':
 
 
         if PARAMS['layers_in_MXD'] == 'essentials':
-            groups = {k: PARAMS['gr_names_keys'][k] for k in ('CHMtreeTops', 'TreeTop', 'TreeCrown')}
-            layer_paths = glob.glob(os.path.join(tile_chm_treetops_dir, '*_' + PARAMS['gr_names_keys']['CHMtreeTops'] + '.asc'))
+            groups = {k: PARAMS['gr_names_keys'][k] for k in ('VegMaskFilled', 'CHMtreeTops', 'TreeTop', 'TreeCrown')}
+            layer_paths = glob.glob(os.path.join(tile_mask_dir, '*_'+PARAMS['gr_names_keys']['VegMaskFilled']+'.asc'))
+            layer_paths.extend(glob.glob(os.path.join(tile_chm_treetops_dir, '*_' + PARAMS['gr_names_keys']['CHMtreeTops'] + '.asc')))
             layer_paths.extend(glob.glob(os.path.join(tile_chm_treetops_dir, '*_' + PARAMS['gr_names_keys']['TreeTop'] + '.asc')))
             layer_paths.extend(glob.glob(os.path.join(tile_segmented_dir, '*_' + PARAMS['gr_names_keys']['TreeCrown'] + '.shp')))
         elif PARAMS['layers_in_MXD'] == 'all':
@@ -540,7 +539,8 @@ if __name__ == '__main__':
         grouping_dict = {n:[groups[n], positions[i]] for i, n in enumerate(groups)}
         group_arcmap_layers(mxd, df, os.path.join(PARAMS['base_dir'], 'mxds', 'lyrs', r'NewGroupLayer.lyr'), grouping_dict)
 
-        ## Saving final MXD
+        ## Make path relative and save final MXD
+        mxd.relativePaths = True
         mxd.saveACopy(PARAMS['output_mxd'])
 
     print('Total ' + toc(start_time))
