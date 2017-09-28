@@ -5,37 +5,14 @@ File Name: ASSESS_BigTrees_Vancouver.py
 Objective: Assessment of tree detection algorithm: detection rate, stem location and attributes.
 """
 
-## TO DO -------------------------------------------------------------------
-
-## STILL TO DO:
-
-
-# Prior to actual run:
-# - reset all parameters to full run values
-
-## SOLVED:
-# - check why distances do not correspond in mxd -- distances do correspond, they are wrt the centroid of the polygon though and not wrt the peak
-# - adjust height cut off to avoid including too many small GT trees -- set as parameter, now with 4 m, but could be raised to 10 or so (we are interestest in big trees > 40 m)
-# - include height measurements in GT -- reference height taken from column PARAMS['obs_ht_colname'], will have to be adapted for each reference shp
-# - create unique tree ID for Ira's dataset points and those that are missing it -- unique ID created with new IDs starting at 26681
-# - see when to use height in RASTERVALU and when the true tree height -- we use RASTERVALU to filter out reference trees lower than a certain height threshold,
-#                                                                         but then error calculation is done on the avg_ht, if non-zero values are present (in that case NaN is set as error)
-# - how to manage tiles/borders/counting double? -- remove the duplicate created bc of overlapping tiles in final error_df before computation of measures
-# - remove duplicates from TP, FN counts across tiles -- done by growing Series of TREE_IDs being either TP or FN and then removing duplicates
-# - improve criterion for background -- background is now removed at the end of MAIN_BigTree_Vancouver.py
-
 ## IMPORT MODULES ---------------------------------------------------------------
 
-
-from __future__ import division  # to allow floating point divisions
+from __future__ import division  ## to allow floating point divisions
 import os
 import sys
 import warnings
 import glob
 import time
-import logging
-import shutil     # to remove folders and their contents
-import gc       # to manually run garbage collection
 import arcpy
 import numpy as np
 import matplotlib as mpl
@@ -55,21 +32,6 @@ if __name__ == '__main__':
     PARAMS = {}
 
     PARAMS['base_dir'] = r'D:\Research\ANALYSES\BigTreesVan'
-
-    # PARAMS['dataset_name'] = 'Tune_alg_1tile_QE'
-    # PARAMS['experiment_name'] = 'step_0p3m_mindist_8_FINAL'
-
-    # PARAMS['experiment_name'] = 'step_0p3m_radius_4'
-    # PARAMS['experiment_name'] = 'step_0p5m_radius_2'
-    # PARAMS['experiment_name'] = 'step_0p5m_radius_4'
-    # PARAMS['experiment_name'] = 'step_0p3m_radius_6'
-    # PARAMS['experiment_name'] = 'step_0p5m_radius_6'
-    # PARAMS['experiment_name'] = 'step_1m_radius_4'
-    # PARAMS['experiment_name'] = 'step_0p4m_radius_5'
-    # PARAMS['experiment_name'] = 'step_0p4m_radius_4'
-    # PARAMS['experiment_name'] = 'step_0p4m_radius_6'
-    # PARAMS['experiment_name'] = 'step_0p3m_radius_10'
-    # PARAMS['experiment_name'] = 'step_0p3m_radius_8_nofill'
 
     PARAMS['dataset_name'] = 'Vancouver_500m_tiles'
     PARAMS['experiment_name'] = 'step_0p3m_mindist_8_mask_5m'
@@ -203,6 +165,7 @@ if __name__ == '__main__':
     TP_tree_IDs = TP_tree_IDs.drop_duplicates()
     FN_tree_IDs = FN_tree_IDs.drop_duplicates()
 
+    ## Compute accuracy metrics
     RES = {}
     RES['TPR'] = len(TP_tree_IDs) / (len(TP_tree_IDs) + len(FN_tree_IDs))
     RES['FNR'] = len(FN_tree_IDs) / (len(TP_tree_IDs) + len(FN_tree_IDs))
@@ -217,6 +180,7 @@ if __name__ == '__main__':
     RES['n_Z'] = sum(~error_df['error_Z'].isnull())
     RES['n_Crown_dm'] = sum(~error_df['error_crown_dm'].isnull())
 
+    ## Save RES dictionary to a json file
     res_filename = 'RES_ASSESS_%s_%s_predHtThresh%d.json' % (PARAMS['dataset_name'], PARAMS['experiment_name'], PARAMS['tree_ht_thresh'])
     with open(os.path.join(PARAMS['exp_dir'], res_filename), 'w') as fp:
         json.dump(RES, fp)

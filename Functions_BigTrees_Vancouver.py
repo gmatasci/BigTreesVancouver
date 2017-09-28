@@ -1,3 +1,11 @@
+"""
+Project Name: BigTreesVan
+Authors: Giona Matasci (giona.matasci@gmail.com)
+File Name: Functions_BigTrees_Vancouver.py
+Objective: Set of utility functions called within the other scripts.
+"""
+
+
 import time
 import sys
 import arcpy
@@ -111,7 +119,7 @@ def group_arcmap_layers(mxd_in, df_in, empty_gr_lyr_path, grouping_dict):
     empty_gr_lyr_path: string
         Path to empty group layer file .lyr
     grouping_dict: dictionary
-        Dictionary with pairs of group name and corresponding file key (for glob.glob()) of the layers to group together
+        Dictionary with pairs of group name and corresponding list of file key (for glob.glob()) and position of the layers to group together
 
     Returns
     -------

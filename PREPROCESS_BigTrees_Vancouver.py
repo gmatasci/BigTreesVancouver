@@ -7,7 +7,6 @@ remove duplicate Tree_IDs creating unique values, attach tentative height values
 attribute table with field collected data.
 """
 
-
 ## IMPORT MODULES ---------------------------------------------------------------
 
 from __future__ import division  # to allow floating point divisions
@@ -34,16 +33,18 @@ if __name__ == '__main__':
     PARAMS['merge_clean_data'] = True   ## main switch to be set to False not to rerun the merge of initial shapefiles and duplicate ID removal (risk of messing up tree IDs used in the field)
     PARAMS['attach_field_data'] = False    ## switch to join the xls table with field data measurements
 
-    PARAMS['measures_fieldnames'] = ['avg_ht', 'cr_diam', 'ht_liv_cr', 'NOTES']
+    PARAMS['measures_fieldnames'] = ['avg_ht', 'cr_diam', 'ht_liv_cr', 'NOTES']   ## names of attributes measured in the field
 
-    PARAMS['ref_trees_path'] = r'E:\BigTreesVan_data\GroundTruth\reference_trees.shp'
+    PARAMS['ref_trees_path'] = r'E:\BigTreesVan_data\GroundTruth\reference_trees.shp'  ## path to which to save the reference trees shp
+    PARAMS['park_trees_path'] = r'E:\BigTreesVan_data\GroundTruth\Tree_Park.shp'  ## path to City of Vancouver park tree database
+    PARAMS['kerrisdale_big_trees_path'] = r'E:\BigTreesVan_data\GroundTruth\Kerrisdale_big_trees.shp'  ## path to Ira's Kerrisdale Elem. school dataset
+    PARAMS['stanley_park_big_tree_path'] = r'E:\BigTreesVan_data\GroundTruth\Stanley_Park_big_tree_data_Sutherland_I.shp'  ## path to Ira's Stanley Park dataset
+    PARAMS['field_data_path'] = r'E:\BigTreesVan_data\GroundTruth\VanBigTrees_FieldTrip\VanBigTrees_FieldTrip.xlsx'  ## path to XLS with field collected data by IRSS
 
-    PARAMS['field_data_path'] = r'E:\BigTreesVan_data\GroundTruth\VanBigTrees_FieldTrip\VanBigTrees_FieldTrip.xlsx'
+    PARAMS['base_dir'] = r'D:\Research\ANALYSES\BigTreesVan'  ## base working directory
 
-    PARAMS['base_dir'] = r'D:\Research\ANALYSES\BigTreesVan'
-
-    PARAMS['dataset_name'] = 'Vancouver_500m_tiles'
-    PARAMS['experiment_name'] = 'step_0p3m_mindist_8'
+    PARAMS['dataset_name'] = 'Vancouver_500m_tiles'    ## name of main folder with results of different experiment
+    PARAMS['experiment_name'] = 'step_0p3m_mindist_8_mask_5m'  ## name of folder with results of a given experiment
 
     PARAMS['wkg_dir'] = os.path.join(PARAMS['base_dir'], 'wkg')
     PARAMS['exp_dir'] = os.path.join(PARAMS['wkg_dir'], PARAMS['dataset_name'], PARAMS['experiment_name'])
@@ -64,22 +65,21 @@ if __name__ == '__main__':
 
     if PARAMS['merge_clean_data']:
 
-        ## Merging GT shps
         print('Merging shps')
 
-        park_trees_path = r'E:\BigTreesVan_data\GroundTruth\Tree_Park.shp'
-        arcpy.AddXY_management(park_trees_path)
-        stanley_park_big_tree_path = r'E:\BigTreesVan_data\GroundTruth\Stanley_Park_big_tree_data_Sutherland_I.shp'
-        stanley_park_big_tree_OKheight_path = stanley_park_big_tree_path.replace('Stanley_Park_big_tree_data_Sutherland_I', 'Stanley_Park_big_tree_data_Sutherland_I_OKheight')
-        arcpy.Copy_management(stanley_park_big_tree_path, stanley_park_big_tree_OKheight_path)
+        ## Add X and Y coordinates in a common format and remove trees < than threshold from Ira's dataset
+        arcpy.AddXY_management(PARAMS['park_trees_path'])
+        stanley_park_big_tree_OKheight_path = PARAMS['stanley_park_big_tree_path'].replace('Stanley_Park_big_tree_data_Sutherland_I', 'Stanley_Park_big_tree_data_Sutherland_I_OKheight')
+        arcpy.Copy_management(PARAMS['stanley_park_big_tree_path'], stanley_park_big_tree_OKheight_path)
         with arcpy.da.UpdateCursor(stanley_park_big_tree_OKheight_path, "avg_ht") as cursor:
             for row in cursor:
-                if row[0] < 30:
+                if row[0] < PARAMS['ht_thresh_to_sample']:
                     cursor.deleteRow()
         arcpy.AddXY_management(stanley_park_big_tree_OKheight_path)
-        kerrisdale_big_trees_path = r'E:\BigTreesVan_data\GroundTruth\Kerrisdale_big_trees.shp'
-        arcpy.AddXY_management(kerrisdale_big_trees_path)
-        arcpy.Merge_management([park_trees_path, stanley_park_big_tree_OKheight_path, kerrisdale_big_trees_path], PARAMS['ref_trees_path'])
+        arcpy.AddXY_management(PARAMS['kerrisdale_big_trees_path'])
+
+        ## Merging GT shps
+        arcpy.Merge_management([PARAMS['park_trees_path'], stanley_park_big_tree_OKheight_path, PARAMS['kerrisdale_big_trees_path']], PARAMS['ref_trees_path'])
 
         print('Making Tree IDs unique')
 

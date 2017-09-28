@@ -2,43 +2,13 @@
 Project Name: BigTreesVan
 Authors: Giona Matasci (giona.matasci@gmail.com)
 File Name: MAIN_BigTrees_Vancouver.py
-Objective: Build high-res CHM from LiDAR for the city of Vancouver, detect treetops, segment crowns, extract attributes,
+Objective: Build high-resolution CHM from LiDAR for the city of Vancouver, detect treetops, segment crowns, extract attributes,
 and build MXD project to visualize layers in ArcMap.
 """
 
-## TO DO -------------------------------------------------------------------
-
-## STILL TO DO:
-
-
-# Prior to actual run:
-# - check # mask_filled
-# - reset all parameters to full run values
-
-## SOLVED:
-# - treetops cannot be closer than a certain distance -- corner_peaks() handles min_distance_peaks properly (peak_local_max() does not)
-# - save PARAMS object in wkg folder -- done as JSON file
-# - put in a folder that does not get deleted the shps that are source for lyrs files -- folder in "D:\Research\ANALYSES\BigTreesVan\mxds\lyrs\source_layers"
-# - lasgrid and las2dem create raster tiles with a difference of 1 row/column -- they still do but using a common layers extent we can clip rasters to a common extent
-# - add final layers to mxd with symbology
-# - remove small single pixel segments with some majority vote filter and update unique labels. To check which ones are with:
-        # unique, counts = np.unique(segments_arr, return_counts=True)
-        # unique_counts = pd.DataFrame({'lab':unique, 'counts':counts})
-        # srt_unique_counts = unique_counts.sort('counts') -- not happening anymore
-# - lastile producing weird number of tiles -- when running on whole Vancouver is ok
-# - check usage of all cores -- works for lastools functions with -cores option
-# - how to stitch back tiles? -- not needed, as results will be provided tiled. Could be done by simple merge as now the tiles no longer contain border segments. One possibility was with http://desktop.arcgis.com/en/arcmap/latest/tools/spatial-analyst-toolbox/remove-raster-segment-tiling-artifacts.htm
-# - remove tile buffers? (in lastools or in arcpy w extent.Xmin+buffer, etc.) -- not needed, plus final tiles with segments cannot be unbuffered
-# - watershed segmentation with markers: python vs OTB -- not done as we keep tiles (no need for tile-merging utility of OTB) and as it seems OTB cannot do segmentation with markers
-# - treetop finder varying with height (from R?) -- too many parameters to fit
-# - the tip of tall trees is classified as "unclassified", so vegetation mask has holes -- run LAStools classification with lasclassify
-# - running gradient on mean CHM or on raw CHM does not improve results: same elongated objects are possible (mean CHM bc is very similar to open by reconstruction mean chm, raw CHM bc too many details)
-# - big error found: watershed should be run on negative CHM (mean or raw does not change much), not on gradient. This way we avoid ugly elongated objects
-
 ## IMPORT MODULES ---------------------------------------------------------------
 
-
-from __future__ import division  # to allow floating point divisions
+from __future__ import division  ## to allow floating point divisions
 import os
 import sys
 import glob
@@ -66,44 +36,28 @@ if __name__ == '__main__':
 
     PARAMS = {}
 
-    # PARAMS['lidar_processing'] = True
-    PARAMS['lidar_processing'] = False
+    PARAMS['lidar_processing'] = False   ## switch to run the processing of the LAS tiles with LAStools (set to False to avoid this time-consuming step and start from files already available in folders)
 
-    PARAMS['raster_processing'] = True
-    # PARAMS['raster_processing'] = False
+    PARAMS['raster_processing'] = True    ## switch to run the raster based processing (CHM, treetop detection, segmentation)
 
-    PARAMS['build_CHMs'] = True
-    # PARAMS['build_CHMs'] = False
+    PARAMS['build_CHMs'] = True   ## sub-switch to run the CHM creation
 
-    PARAMS['segment_crowns'] = True
-    # PARAMS['segment_crowns'] = False
+    PARAMS['segment_crowns'] = True  ## sub-switch to segment the tree crowns
 
-    PARAMS['build_MXD'] = True
-    # PARAMS['build_MXD'] = False
+    PARAMS['build_MXD'] = True  ## switch to build ArcMap MXD project to visualize results
 
-    # PARAMS['layers_in_MXD'] = 'all'
-    PARAMS['layers_in_MXD'] = 'essentials'
+    PARAMS['layers_in_MXD'] = 'essentials'  ## specify types of layers to load into MXD, 'all' or 'essentials' (for a lighter file)
 
-    PARAMS['write_files'] = True
-    # PARAMS['write_files'] = False
+    PARAMS['write_files'] = True   ## switch to save each type of generated layer, for visual checks
 
-    # PARAMS['plot_figures'] = True
-    PARAMS['plot_figures'] = False
+    PARAMS['plot_figures'] = False   ## switch to plot figures, for visual checks
 
     PARAMS['base_dir'] = r'D:\Research\ANALYSES\BigTreesVan'
 
     PARAMS['dataset_name'] = 'Vancouver_500m_tiles'
-    # PARAMS['dataset_name'] = 'Tune_alg_8tiles'
-    # PARAMS['dataset_name'] = '1tile_UBC_Piotr'
-    # PARAMS['dataset_name'] = 'Tune_alg_1tile_QE'
-
     PARAMS['experiment_name'] = 'step_0p3m_mindist_8_mask_5m'
-    # PARAMS['experiment_name'] = 'step_0p3m_mindist_8_WITH_HIGH_VEG_MASK'
 
-    #### TODO TO LAZ and remove unzipped las
     PARAMS['data_dir'] = r'E:\BigTreesVan_data\LiDAR\CoV\Classified_LiDAR'
-    #### TODO LAZ and remove unzipped las
-    # PARAMS['data_dir'] = os.path.join(PARAMS['base_dir'], r'wkg\trial_data_'+PARAMS['dataset_name'])
 
     PARAMS['wkg_dir'] = os.path.join(PARAMS['base_dir'], 'wkg')
     PARAMS['exp_dir'] = os.path.join(PARAMS['wkg_dir'], PARAMS['dataset_name'], PARAMS['experiment_name'])
@@ -116,7 +70,7 @@ if __name__ == '__main__':
     PARAMS['tile_size'] = 500      ## tile size for lidar processing with lastools (half the tile size of tiles received from City of Vancouver)
     PARAMS['tile_buffer'] = 30      ## tile buffer to avoid boundary problems (we expect no tree crown to be bigger than this)
 
-    PARAMS['step'] = 0.3   ## 0.3, pixel size of raster layers (DSM, CHM, masks, etc.)
+    PARAMS['step'] = 0.3   ## pixel size of raster layers (DSM, CHM, masks, etc.)
 
     PARAMS['cell_size'] = 2    ## lasnoise parameter to remove powerlines: size in meters of each voxel of the 3x3 voxel neighborhood
     PARAMS['isolated'] = 50     ## lasnoise parameter to remove powerlines: remove points that have less neighboring points than this threshold in the 3x3 voxel neighborhood
@@ -136,7 +90,7 @@ if __name__ == '__main__':
 
     PARAMS['tree_ht_thresh'] = 15   ## height threshold in meters below which we remove segmented trees
 
-    PARAMS['crown_dm_thresh'] = 40  ## crown diameter threshold in meters above which the polygon is no more a tree but instead the background to eliminate
+    PARAMS['crown_dm_thresh'] = 40  ## crown diameter threshold in meters above which the polygon is no more a tree but instead the background to eliminate from shapefile of crowns
 
     PARAMS['gr_names_keys'] = {'VegMaskRaw': 'veg_mask_raw',
                                'VegMaskFilled': 'veg_mask_filled',
@@ -191,7 +145,7 @@ if __name__ == '__main__':
     with open(os.path.join(PARAMS['exp_dir'], params_filename), 'w') as fp:
         json.dump(PARAMS, fp)
 
-    arcpy.env.workspace = arcgis_temp_dir  # set temporary files directory (used when calling Reclassify(), etc.), could use arcpy.env.workspace = "in_memory"
+    arcpy.env.workspace = arcgis_temp_dir  ## set temporary files directory (used when calling Reclassify(), etc.), could use arcpy.env.workspace = "in_memory"
 
     if PARAMS['lidar_processing']:
 

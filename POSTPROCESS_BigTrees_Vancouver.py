@@ -5,19 +5,6 @@ File Name: POSTPROCESS_BigTrees_Vancouver.py
 Objective: Merge the tiles with the segmented crowns into a single shapefile, clean the dataset and plot interesting data
 """
 
-## TO DO -------------------------------------------------------------------
-
-## STILL TO DO:
-
-# Prior to actual run:
-# - reset all parameters to full run values
-
-## SOLVED:
-# - DeleteIdentical_management to be run on Shape and not on attributes (even with Tree_ht and Crown_dm we have identical entries bc a raster is the source)
-# - check missing tile at Burrard -- original las file was not properly classified (missing high vegetation)
-# - merge still having duplicate polygons -- should be good with XY_tolerance 1.2 m
-# - change to merge classified tiles --
-
 
 ## IMPORT MODULES ---------------------------------------------------------------
 
@@ -45,26 +32,26 @@ if __name__ == '__main__':
     PARAMS['dataset_name'] = 'Vancouver_500m_tiles'
     PARAMS['experiment_name'] = 'step_0p3m_mindist_8_mask_5m'
 
+    PARAMS['merged_seg_filename'] = 'TreeCrowns_Vancouver.shp'  ## filename for the final shapefile containing the merged tree crowns
+    PARAMS['final_dir'] = os.path.join(PARAMS['exp_dir'], 'FINAL_Outputs')  ## folder to save final merged shapefile
+
+    PARAMS['fig_dir'] = os.path.join(PARAMS['exp_dir'], 'Figures')   ## folder to save the figures
+
     PARAMS['wkg_dir'] = os.path.join(PARAMS['base_dir'], 'wkg')
     PARAMS['exp_dir'] = os.path.join(PARAMS['wkg_dir'], PARAMS['dataset_name'], PARAMS['experiment_name'])
 
     PARAMS['output_mxd'] = os.path.join(PARAMS['exp_dir'], r'VanBigTrees_'+PARAMS['dataset_name']+'_'+PARAMS['experiment_name']+'.mxd')   ## path to final mxd to save results
 
-    PARAMS['XY_tolerance'] = "1.5 Meters"   ## increase spatial tolerance to deal with small shift in the tiles when mergind and deleting duplicate polygons
+    PARAMS['XY_tolerance'] = "1.5 Meters"   ## spatial tolerance to deal with small shift in the tiles when mergind and deleting duplicate polygons
 
     PARAMS['max_tree_ht'] = 66   ## segments higher than this threshold are not trees (cranes, towers, trees on top of buildings, etc.)
     PARAMS['min_crown_dm'] = 2   ## segments with crown diameter lower than this threshold are not trees (cranes, towers, trees on top of buildings, etc.)
     PARAMS['X_coord_artifact'] = 498000   ## x coordinate (beginning of easternmost tile) past which there are artifacts due to missing ground point in las files in E:\BigTreesVan_data\LiDAR\CoV\Classified_LiDAR\las
 
-    PARAMS['merged_seg_filename'] = 'TreeCrowns_Vancouver.shp'
+    PARAMS['tile_segmented_file_key'] = os.path.join(PARAMS['exp_dir'], 'tiles_classified_FINAL', '*_segments_classif.shp')  ## filekey to list all the tiles to merge
 
-    PARAMS['tile_segmented_file_key'] = os.path.join(PARAMS['exp_dir'], 'tiles_classified_FINAL', '*_segments_classif.shp')
+    PARAMS['source_lyr_path'] = os.path.join(PARAMS['base_dir'], 'mxds', 'lyrs', r'conif_decid.lyr')  ## path to the layer file .lyr to assign the proper symbology to the classified and merged crowns
 
-    PARAMS['source_lyr_path'] = os.path.join(PARAMS['base_dir'], 'mxds', 'lyrs', r'conif_decid.lyr')
-
-    PARAMS['final_dir'] = os.path.join(PARAMS['exp_dir'], 'FINAL_Outputs')
-
-    PARAMS['fig_dir'] = os.path.join(PARAMS['exp_dir'], 'Figures')
 
 ## START ---------------------------------------------------------------------
 

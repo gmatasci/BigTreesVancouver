@@ -1,7 +1,14 @@
-## Add LAStools bin directory to the system PATH environment variable by:
-# "Edit the system environment variables" --> "Environment variables"
-# --> select variable "PATH" in "User variables for gmatasci" --> "Edit..."
-# --> paste "C:\LAStools\bin" after a ";" without any space
+"""
+Project Name: BigTreesVan
+Authors: Giona Matasci (giona.matasci@gmail.com)
+File Name: Functions_LAStools.py
+Objective: Wrapper functions to call LAStools commands used for lidar data processing.
+Add LAStools bin directory to the system PATH environment variable by:
+"Edit the system environment variables" --> "Environment variables"
+--> select variable "PATH" in "User variables for gmatasci" --> "Edit..."
+--> paste "C:\LAStools\bin" after a ";" without any space
+"""
+
 
 import arcpy
 import numpy as np

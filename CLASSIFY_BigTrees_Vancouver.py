@@ -5,15 +5,6 @@ File Name: CLASSIFY_BigTrees_Vancouver.py
 Objective: Classify segmented tree crowns into deciduous or coniferous and assess classification accuracy
 """
 
-## TO DO -------------------------------------------------------------------
-
-## STILL TO DO:
-
-# Prior to actual run:
-# - reset all parameters to full run values
-
-## SOLVED:
-# -
 
 ## IMPORT MODULES ---------------------------------------------------------------
 
@@ -24,8 +15,6 @@ import sys
 import glob
 import time
 import logging
-import shutil     # to remove folders and their contents
-import gc       # to manually run garbage collection
 import arcpy
 import numpy as np
 import matplotlib as mpl
@@ -48,18 +37,15 @@ if __name__ == '__main__':
 
     PARAMS = {}
 
-    # PARAMS['lidar_preprocessing'] = True  ## whether or not to run the sorting and indexing of the tiles
-    PARAMS['lidar_preprocessing'] = False
+    PARAMS['lidar_preprocessing'] = True  ## switch to run the sorting and indexing of the tiles
 
-    # PARAMS['build_dataset'] = True
-    PARAMS['build_dataset'] = False
+    PARAMS['build_dataset'] = False   ## switch to run the long loop reading the GT in each tile
 
-    # PARAMS['train_rf_model'] = True
-    PARAMS['train_rf_model'] = False
+    PARAMS['train_rf_model'] = False  ## switch to run the training of the model and save it, or, alternatively to load it from a file
 
-    PARAMS['predict_on_tiles'] = True
+    PARAMS['predict_on_tiles'] = True  ## switch to run the prediction with the RF model on all the tiles
 
-    PARAMS['load_in_MXD'] = True
+    PARAMS['load_in_MXD'] = True  ## switch to load the final result into the MXD project
 
     PARAMS['base_dir'] = r'D:\Research\ANALYSES\BigTreesVan'
 
@@ -73,20 +59,20 @@ if __name__ == '__main__':
 
     PARAMS['ref_trees_path'] = r'E:\BigTreesVan_data\GroundTruth\reference_trees.shp'
 
-    PARAMS['ht_filter_colname'] = 'Tree_ht'   ## column name containing the predicted height of reference trees
-    PARAMS['ref_tree_thresh'] = 15   ## height threshold in meters below which we remove reference trees
+    PARAMS['ht_filter_colname'] = 'Tree_ht'   ## column name to use for filtering based on the height values
+    PARAMS['tree_ht_thresh'] = 15   ## height threshold in meters below which we remove the trees to be used in the classification
 
     PARAMS['train_pct'] = 0.70    ## percentage of samples being assigned to the training set
 
-    PARAMS['ht_cutoff'] = 2
-    PARAMS['bicentiles_upper'] = 99
+    PARAMS['ht_cutoff'] = 2   ## height cutoff in m to be used in lascanopy to compute lidar metrics
+    PARAMS['bicentiles_upper'] = 99   ## centile of height to use as upper value in the computation of the bicentiles
 
     PARAMS['lidar_metrics'] = '-cov -dns -ske -kur -avg -std -qav -p 10 20 30 40 50 60 70 80 90 95 99 -b 10 20 30 40 50 60 70 80 90 95'   ## string with lascanopy commands to extract metrics
     PARAMS['to_normalize'] = ['avg', 'std', 'qav', 'p10', 'p20', 'p30', 'p40', 'p50', 'p60', 'p70', 'p80', 'p90', 'p95']   ## list of CSV column names of metrics to be normalized (by the 99th centile)
     PARAMS['feature_names'] = ['cov', 'dns', 'ske', 'kur', 'norm_avg', 'norm_std', 'norm_qav', 'norm_p10', 'norm_p20',  'norm_p30', 'norm_p40', 'norm_p50', 'norm_p60', 'norm_p70', 'norm_p80', 'norm_p90', 'norm_p95', 'b10', 'b20',  'b30', 'b40', 'b50', 'b60', 'b70', 'b80', 'b90', 'b95']   ## final feature names to feed to the RF
 
     PARAMS['ntrees'] = 1000    ## number of RF trees
-    PARAMS['rf_model_path'] = os.path.join(PARAMS['exp_dir'], 'rf_model_%d.pkl' % PARAMS['ntrees'])
+    PARAMS['rf_model_path'] = os.path.join(PARAMS['exp_dir'], 'rf_model_%d.pkl' % PARAMS['ntrees'])  ## path at which to save the RF model file
 
     PARAMS['nr_cores'] = 32   ## number of cores to be used by lastools functions and by RF
 
@@ -120,8 +106,8 @@ if __name__ == '__main__':
         if not os.path.exists(dir):
             os.makedirs(dir)
 
+    ## Sort and reindex lidar tiles to speed up massively the extraction of metrics with lascanopy
     if PARAMS['lidar_preprocessing']:
-
         lassort(in_dir=tile_ht_norm_classif_dir, out_dir=tile_ht_norm_classif_sorted_dir, in_ext='laz', nr_cores=PARAMS['nr_cores'], verbose=True)
         lasindex(in_dir=tile_ht_norm_classif_sorted_dir, in_ext='laz', nr_cores=PARAMS['nr_cores'], verbose=True)
 
@@ -191,7 +177,7 @@ if __name__ == '__main__':
             ## Read attribute table and remove reference trees whose height is below a threshold
             join_df = Dbf5(os.path.join(arcgis_temp_dir, 'ref_trees_segments_join_classif.shp').replace('shp', 'dbf')).to_dataframe()
 
-            drop_bool = join_df[PARAMS['ht_filter_colname']] < PARAMS['ref_tree_thresh']  ## to be dropped a tree has be under a certain threshold in filtering height retieved based on the raw CHM
+            drop_bool = join_df[PARAMS['ht_filter_colname']] < PARAMS['tree_ht_thresh']  ## to be dropped a tree has be under a certain threshold in filtering height retieved based on the raw CHM
             join_df = join_df.drop(join_df[drop_bool].index)
 
             ## Initialize classif_df_tile df to contain data for this tile
@@ -270,6 +256,7 @@ if __name__ == '__main__':
           'Class-specific measures:\n %s'
           % (RES['conf_mat'], RES['OA'], RES['Kappa'], RES['class_measures']))
 
+    ## Save RES dictionary to a json file
     RES['conf_mat'] = RES['conf_mat'].to_json()
     res_filename = 'RES_CLASSIFY_%s_%s.json' % (PARAMS['dataset_name'], PARAMS['experiment_name'])
     with open(os.path.join(PARAMS['exp_dir'], res_filename), 'w') as fp:
@@ -307,6 +294,7 @@ if __name__ == '__main__':
             if 'Pred_Conif' in segments_df.columns:
                 segments_df = segments_df.drop('Pred_Conif', axis=1)
 
+            ## Normalize variables by the 99th centile
             try:
                 df_norm_tile = lidar_metric_df[PARAMS['to_normalize']].div(lidar_metric_df['p99'], axis=0)
             except:
