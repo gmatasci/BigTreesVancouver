@@ -2,13 +2,12 @@
 Project Name: BigTreesVan
 Authors: Giona Matasci (giona.matasci@gmail.com)
 File Name: CLASSIFY_BigTrees_Vancouver.py
-Objective: Classify segmented tree crowns into deciduous or coniferous
+Objective: Classify segmented tree crowns into deciduous or coniferous and assess classification accuracy
 """
 
 ## TO DO -------------------------------------------------------------------
 
 ## STILL TO DO:
-# - use complete merged shp with all the reference trees
 
 # Prior to actual run:
 # - reset all parameters to full run values
@@ -28,16 +27,12 @@ import logging
 import shutil     # to remove folders and their contents
 import gc       # to manually run garbage collection
 import arcpy
-# from arcpy.sa import *   ## for  arcpy.sa.RemoveRasterSegmentTilingArtifacts(r'D:\Research\ANALYSES\BigTreesVan\wkg\temp\200m_2tiles\tiles_segmented\484200_5457400_segments_img.asc')
 import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import pandas as pd
 import json
 import cPickle
-from subprocess import check_output
-import multiprocessing as mp
-from functools import partial
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import *
 from simpledbf import Dbf5
@@ -68,33 +63,27 @@ if __name__ == '__main__':
 
     PARAMS['base_dir'] = r'D:\Research\ANALYSES\BigTreesVan'
 
-    PARAMS['experiment_name'] = '0p3m_PF_CHM_minDistpeaks_7'
-
-    PARAMS['dataset_name'] = 'tune_alg_10tiles'
-
-    PARAMS['output_mxd'] = os.path.join(PARAMS['exp_dir'], r'VanBigTrees_'+PARAMS['dataset_name']+'_'+PARAMS['experiment_name']+'.mxd')   ## path to final mxd to save results
-
-    #### TO LAZ and remove unzipped las
-    # PARAMS['data_dir'] = os.path.join(PARAMS['base_dir'], r'E:\BigTreesVan_data')
-    #### TO LAZ and remove unzipped las
-    PARAMS['data_dir'] = os.path.join(PARAMS['base_dir'], r'wkg\trial_data_'+PARAMS['dataset_name'])
+    PARAMS['dataset_name'] = 'Vancouver_500m_tiles'
+    PARAMS['experiment_name'] = 'step_0p3m_mindist_8_mask_5m'
 
     PARAMS['wkg_dir'] = os.path.join(PARAMS['base_dir'], 'wkg')
     PARAMS['exp_dir'] = os.path.join(PARAMS['wkg_dir'], PARAMS['dataset_name'], PARAMS['experiment_name'])
+
+    PARAMS['output_mxd'] = os.path.join(PARAMS['exp_dir'], r'VanBigTrees_'+PARAMS['dataset_name']+'_'+PARAMS['experiment_name']+'.mxd')   ## path to final mxd to save results
 
     PARAMS['ref_trees_path'] = r'E:\BigTreesVan_data\GroundTruth\reference_trees.shp'
 
     PARAMS['ht_filter_colname'] = 'Tree_ht'   ## column name containing the predicted height of reference trees
     PARAMS['ref_tree_thresh'] = 15   ## height threshold in meters below which we remove reference trees
 
-    PARAMS['train_pct'] = 0.60    ## percentage of samples being assigned to the training set
+    PARAMS['train_pct'] = 0.70    ## percentage of samples being assigned to the training set
 
-    PARAMS['lidar_metrics'] = '-cov -dns -ske -kur -qav -std -p 10 20 30 40 50 60 70 80 90 95 99 -b 10 20 30 40 50 60 70 80 90'   ## string with lascanopy commands to extract metrics
-    # PARAMS['lidar_metrics'] = '-cov -std -p 30 60 90 99 -b 50 70 90'
-    PARAMS['to_normalize'] = ['std', 'p10', 'p20',  'p30', 'p40', 'p50', 'p60', 'p70', 'p80', 'p90', 'p95', 'b10', 'b20',  'b30', 'b40', 'b50', 'b60', 'b70', 'b80', 'b90']   ## list of CSV column names of metrics to be normalized (by the 99th centile)
-    # PARAMS['to_normalize'] = ['std', 'p30', 'p60', 'p90']
-    PARAMS['feature_names'] = ['cov', 'dns', 'ske', 'kur', 'qav', 'rel_std', 'rel_p10', 'rel_p20',  'rel_p30', 'rel_p40', 'rel_p50', 'rel_p60', 'rel_p70', 'rel_p80', 'rel_p90', 'rel_p95', 'b10', 'b20',  'b30', 'b40', 'b50', 'b60', 'b70', 'b80', 'b90']   ## final feature names to feed to the RF
-    # PARAMS['feature_names'] = ['cov', 'rel_std', 'rel_p30', 'rel_p60', 'rel_p90', 'b50', 'b70', 'b90']
+    PARAMS['ht_cutoff'] = 2
+    PARAMS['bicentiles_upper'] = 99
+
+    PARAMS['lidar_metrics'] = '-cov -dns -ske -kur -avg -std -qav -p 10 20 30 40 50 60 70 80 90 95 99 -b 10 20 30 40 50 60 70 80 90 95'   ## string with lascanopy commands to extract metrics
+    PARAMS['to_normalize'] = ['avg', 'std', 'qav', 'p10', 'p20', 'p30', 'p40', 'p50', 'p60', 'p70', 'p80', 'p90', 'p95']   ## list of CSV column names of metrics to be normalized (by the 99th centile)
+    PARAMS['feature_names'] = ['cov', 'dns', 'ske', 'kur', 'norm_avg', 'norm_std', 'norm_qav', 'norm_p10', 'norm_p20',  'norm_p30', 'norm_p40', 'norm_p50', 'norm_p60', 'norm_p70', 'norm_p80', 'norm_p90', 'norm_p95', 'b10', 'b20',  'b30', 'b40', 'b50', 'b60', 'b70', 'b80', 'b90', 'b95']   ## final feature names to feed to the RF
 
     PARAMS['ntrees'] = 1000    ## number of RF trees
     PARAMS['rf_model_path'] = os.path.join(PARAMS['exp_dir'], 'rf_model_%d.pkl' % PARAMS['ntrees'])
@@ -120,21 +109,21 @@ if __name__ == '__main__':
     arcpy.env.overwriteOutput = True
 
     arcgis_temp_dir = os.path.join(PARAMS['exp_dir'], 'arcgis_temp')
-    tile_ht_norm_dir = os.path.join(PARAMS['exp_dir'], 'tiles_ht_norm')
-    tile_ht_norm_sorted_dir = os.path.join(PARAMS['exp_dir'], 'tiles_ht_norm', 'sorted')
+    tile_ht_norm_classif_dir = os.path.join(PARAMS['exp_dir'], 'tiles_ht_norm_classif')
+    tile_ht_norm_classif_sorted_dir = os.path.join(PARAMS['exp_dir'], 'tiles_ht_norm_classif', 'sorted')
     tile_chm_treetops_dir = os.path.join(PARAMS['exp_dir'], 'tiles_chm_treetops')
     tile_segmented_dir = os.path.join(PARAMS['exp_dir'], 'tiles_segmented')
     tile_lidar_metrics_dir = os.path.join(PARAMS['exp_dir'], 'tiles_lidar_metrics')
     tile_classified_dir = os.path.join(PARAMS['exp_dir'], 'tiles_classified_FINAL')
 
-    for dir in [tile_lidar_metrics_dir, tile_ht_norm_sorted_dir, tile_classified_dir]:
+    for dir in [tile_lidar_metrics_dir, tile_ht_norm_classif_sorted_dir, tile_classified_dir]:
         if not os.path.exists(dir):
             os.makedirs(dir)
 
     if PARAMS['lidar_preprocessing']:
 
-        lassort(in_dir=tile_ht_norm_dir, out_dir=tile_ht_norm_sorted_dir, in_ext='laz', nr_cores=PARAMS['nr_cores'], verbose=True)
-        lasindex(in_dir=tile_ht_norm_sorted_dir, in_ext='laz', nr_cores=PARAMS['nr_cores'], verbose=True)
+        lassort(in_dir=tile_ht_norm_classif_dir, out_dir=tile_ht_norm_classif_sorted_dir, in_ext='laz', nr_cores=PARAMS['nr_cores'], verbose=True)
+        lasindex(in_dir=tile_ht_norm_classif_sorted_dir, in_ext='laz', nr_cores=PARAMS['nr_cores'], verbose=True)
 
     ## List file paths of all tiles
     file_key = os.path.join(tile_segmented_dir, '*_segments_polyg.shp')
@@ -175,9 +164,11 @@ if __name__ == '__main__':
 
             ## Save lascanopy() results in CSV file
             csv_path = os.path.join(tile_lidar_metrics_dir, tile_name + '_lidar_metrics.csv')
-            pt_cloud_path = os.path.join(tile_ht_norm_sorted_dir, tile_name + '_denoised_ht_norm_sorted.laz')
+            pt_cloud_path = os.path.join(tile_ht_norm_classif_sorted_dir, tile_name + '_denoised_ht_norm_classif_sorted.laz')
 
-            polyg_ok_bool[i_tile] = lascanopy(in_laz=pt_cloud_path, in_shp=segments_classified_path, out_csv=csv_path, ht_cutoff=2, metric_cmd=PARAMS['lidar_metrics'], verbose=False)
+            polyg_ok_bool[i_tile] = lascanopy(in_laz=pt_cloud_path, in_shp=segments_classified_path, out_csv=csv_path,
+                                              ht_cutoff=PARAMS['ht_cutoff'], bicentiles_upper=PARAMS['bicentiles_upper'],
+                                              metric_cmd=PARAMS['lidar_metrics'], verbose=False)
 
             ## Read back files and keep only polygons with positive area
             lidar_metric_df = pd.read_csv(csv_path)
@@ -222,7 +213,7 @@ if __name__ == '__main__':
         classif_df = classif_df.reset_index(drop=True)
         classif_df = classif_df.convert_objects(convert_numeric=True)   ## convert columns with dtype 'object' to 'float64'
         df_rel = classif_df[PARAMS['to_normalize']].div(classif_df['p99'], axis=0)
-        df_rel.columns = ['rel_'+str for str in PARAMS['to_normalize']]
+        df_rel.columns = ['norm_'+str for str in PARAMS['to_normalize']]
         classif_df = pd.concat([classif_df.reset_index(drop=True), df_rel], axis=1)
 
         ## Drop duplicate Tree IDs
@@ -316,11 +307,17 @@ if __name__ == '__main__':
             if 'Pred_Conif' in segments_df.columns:
                 segments_df = segments_df.drop('Pred_Conif', axis=1)
 
-            df_rel_tile = lidar_metric_df[PARAMS['to_normalize']].div(lidar_metric_df['p99'], axis=0)
-            df_rel_tile.columns = ['rel_' + str for str in PARAMS['to_normalize']]
-            lidar_metric_df = pd.concat([lidar_metric_df, df_rel_tile], axis=1)
+            try:
+                df_norm_tile = lidar_metric_df[PARAMS['to_normalize']].div(lidar_metric_df['p99'], axis=0)
+            except:
+                to_norm_ok = lidar_metric_df[PARAMS['to_normalize']].convert_objects(convert_numeric=True)
+                denom_ok = lidar_metric_df['p99'].convert_objects(convert_numeric=True)
+                df_norm_tile = to_norm_ok.div(denom_ok, axis=0)
 
-            x_tile = lidar_metric_df[PARAMS['feature_names']]
+            df_norm_tile.columns = ['norm_' + str for str in PARAMS['to_normalize']]
+            lidar_metric_df = pd.concat([lidar_metric_df, df_norm_tile], axis=1)
+
+            x_tile = lidar_metric_df[PARAMS['feature_names']].convert_objects(convert_numeric=True)
             ok_idx = pd.notnull(x_tile).any(1) & ~np.isnan(x_tile).any(1)
 
             lidar_metric_df['Pred_Conif'] = ''

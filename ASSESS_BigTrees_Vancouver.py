@@ -2,7 +2,7 @@
 Project Name: BigTreesVan
 Authors: Giona Matasci (giona.matasci@gmail.com)
 File Name: ASSESS_BigTrees_Vancouver.py
-Objective: Assessment of tree detection algorithm: location and attributes 
+Objective: Assessment of tree detection algorithm: detection rate, stem location and attributes.
 """
 
 ## TO DO -------------------------------------------------------------------
@@ -42,8 +42,6 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import pandas as pd
 import json
-import multiprocessing as mp
-from functools import partial
 from simpledbf import Dbf5
 
 from Functions_BigTrees_Vancouver import*
@@ -58,8 +56,8 @@ if __name__ == '__main__':
 
     PARAMS['base_dir'] = r'D:\Research\ANALYSES\BigTreesVan'
 
-    PARAMS['dataset_name'] = 'Tune_alg_8tiles'
-    PARAMS['experiment_name'] = 'step_0p3m_mindist_8_grad_chm_reconstr'
+    # PARAMS['dataset_name'] = 'Tune_alg_1tile_QE'
+    # PARAMS['experiment_name'] = 'step_0p3m_mindist_8_FINAL'
 
     # PARAMS['experiment_name'] = 'step_0p3m_radius_4'
     # PARAMS['experiment_name'] = 'step_0p5m_radius_2'
@@ -73,8 +71,8 @@ if __name__ == '__main__':
     # PARAMS['experiment_name'] = 'step_0p3m_radius_10'
     # PARAMS['experiment_name'] = 'step_0p3m_radius_8_nofill'
 
-    # PARAMS['dataset_name'] = 'Vancouver_500m_tiles'
-    # PARAMS['experiment_name'] = 'step_0p3m_mindist_8'
+    PARAMS['dataset_name'] = 'Vancouver_500m_tiles'
+    PARAMS['experiment_name'] = 'step_0p3m_mindist_8_mask_5m'
 
     PARAMS['ref_trees_path'] = r'E:\BigTreesVan_data\GroundTruth\reference_trees.shp'
 
@@ -82,7 +80,7 @@ if __name__ == '__main__':
     PARAMS['exp_dir'] = os.path.join(PARAMS['wkg_dir'], PARAMS['dataset_name'], PARAMS['experiment_name'])
 
     PARAMS['ht_filter_colname'] = 'appr_ht'   ## name of column containing the approximate height for reference trees (extracted by overlaying CHM and tree location)
-    PARAMS['ref_tree_thresh'] = 15   ## height threshold in meters below which we remove reference trees
+    PARAMS['tree_ht_thresh'] = 30   ## height threshold in meters below which we remove reference trees
 
     PARAMS['pred_ht_colname'] = 'Tree_ht'  ## name of column containing the predicted height for all trees
     PARAMS['obs_ht_colname'] = 'avg_ht'    ## name of column containing the observed height for reference trees
@@ -101,7 +99,7 @@ if __name__ == '__main__':
     start_time = tic()
 
     ## Save parameters
-    params_filename = 'PARAMS_ASSESS_%s_%s.json' % (PARAMS['dataset_name'], PARAMS['experiment_name'])
+    params_filename = 'PARAMS_ASSESS_%s_%s_predHtThresh%d.json' % (PARAMS['dataset_name'], PARAMS['experiment_name'], PARAMS['tree_ht_thresh'])
     with open(os.path.join(PARAMS['exp_dir'], params_filename), 'w') as fp:
         json.dump(PARAMS, fp)
 
@@ -149,12 +147,12 @@ if __name__ == '__main__':
                                    "JOIN_ONE_TO_MANY", "KEEP_COMMON", "", "CONTAINS")
 
         tile_join_df = Dbf5(os.path.join(arcgis_temp_dir, 'ref_trees_tile_boundary_join.dbf')).to_dataframe()
-        drop_bool = (tile_join_df[PARAMS['obs_ht_colname']] == 0) & (tile_join_df[PARAMS['ht_filter_colname']] < PARAMS['ref_tree_thresh'])  ## to be dropped a tree has to have no measured height value (avg_ht) while being under a certain threshold in filtering height retieved based on the raw CHM
+        drop_bool = (tile_join_df[PARAMS['obs_ht_colname']] == 0) & (tile_join_df[PARAMS['ht_filter_colname']] < PARAMS['tree_ht_thresh'])  ## to be dropped a tree has to have no measured height value (avg_ht) while being under a certain threshold in filtering height retieved based on the raw CHM
         tile_join_df = tile_join_df.drop(tile_join_df[drop_bool].index)
 
         ## Read attribute table and remove reference trees whose height is below a threshold
         seg_join_df = Dbf5(os.path.join(arcgis_temp_dir, 'ref_trees_segments_join.dbf')).to_dataframe()
-        drop_bool = (seg_join_df[PARAMS['obs_ht_colname']] == 0) & (seg_join_df[PARAMS['ht_filter_colname']] < PARAMS['ref_tree_thresh'])  ## to be dropped a tree has to have no measured height value (avg_ht) while being under a certain threshold in filtering height retieved based on the raw CHM
+        drop_bool = (seg_join_df[PARAMS['obs_ht_colname']] == 0) & (seg_join_df[PARAMS['ht_filter_colname']] < PARAMS['tree_ht_thresh'])  ## to be dropped a tree has to have no measured height value (avg_ht) while being under a certain threshold in filtering height retieved based on the raw CHM
         seg_join_df = seg_join_df.drop(seg_join_df[drop_bool].index)
 
         ## Extend FN Series with Tree_IDs of trees not found within the segments
@@ -208,26 +206,30 @@ if __name__ == '__main__':
     RES = {}
     RES['TPR'] = len(TP_tree_IDs) / (len(TP_tree_IDs) + len(FN_tree_IDs))
     RES['FNR'] = len(FN_tree_IDs) / (len(TP_tree_IDs) + len(FN_tree_IDs))
-    RES['XY_RMSE'] = np.sqrt((error_df['error_XY']**2).mean(skipna=True))
+    RES['avg_XYdist'] = error_df['error_XY'].mean(skipna=True)
     RES['Z_RMSE'] = np.sqrt((error_df['error_Z']**2).mean(skipna=True))
     RES['Crown_dm_RMSE'] = np.sqrt((error_df['error_crown_dm']**2).mean())
+    RES['Z_bias'] = error_df['error_Z'].mean(skipna=True)
+    RES['Crown_dm_bias'] = error_df['error_crown_dm'].mean()
 
     RES['n_rates'] = len(TP_tree_IDs) + len(FN_tree_IDs)
     RES['n_XY'] = sum(~error_df['error_XY'].isnull())
     RES['n_Z'] = sum(~error_df['error_Z'].isnull())
     RES['n_Crown_dm'] = sum(~error_df['error_crown_dm'].isnull())
 
-    res_filename = 'RES_ASSESS_%s_%s.json' % (PARAMS['dataset_name'], PARAMS['experiment_name'])
+    res_filename = 'RES_ASSESS_%s_%s_predHtThresh%d.json' % (PARAMS['dataset_name'], PARAMS['experiment_name'], PARAMS['tree_ht_thresh'])
     with open(os.path.join(PARAMS['exp_dir'], res_filename), 'w') as fp:
         json.dump(RES, fp)
 
     print('Main segmentation results:\n\n '
-          'True Positive rate (n=%d):\n %.3f \n\n '
-          'False Negative rate (n=%d):\n %.3f \n\n '
-          'Position (X-Y coord.) RMSE [m] (n=%d):\n %2.2f \n\n '
-          'Treetop height RMSE [m] (n=%d):\n %2.2f \n\n '
-          'Crown diameter RMSE [m] (n=%d):\n %2.2f'
-          % (RES['n_rates'], RES['TPR'], RES['n_rates'], RES['FNR'], RES['n_XY'], RES['XY_RMSE'], RES['n_Z'], RES['Z_RMSE'], RES['n_Crown_dm'], RES['Crown_dm_RMSE']))
+          'Detection rate (n=%d): TPR = %.3f, FNR = %.3f \n\n '
+          'Average X, Y distance (n=%d) [m] = %2.2f \n\n '
+          'Treetop height (n=%d): RMSE [m] = %2.2f, bias [m] = %2.2f \n\n '
+          'Crown diameter (n=%d): RMSE [m] = %2.2f, bias [m] = %2.2f \n\n '
+          % (RES['n_rates'], RES['TPR'], RES['FNR'],
+             RES['n_XY'], RES['avg_XYdist'],
+             RES['n_Z'], RES['Z_RMSE'], RES['Z_bias'],
+             RES['n_Crown_dm'], RES['Crown_dm_RMSE'], RES['Crown_dm_bias']))
 
     print('Total ' + toc(start_time))
 

@@ -69,7 +69,7 @@ def lasnoise(in_dir, out_dir, nr_cores, cell_size=4, isolated=5, in_ext='laz', v
     os.system(cmd)
 
 ## Find the bare-earth points in all tiles
-def lasground_new(in_dir, out_dir, landscape, nr_cores, in_ext='laz', buffer_mode='NONE', tile_buffer=0, spike_down=0, verbose=False):
+def lasground_new(in_dir, out_dir, landscape, nr_cores, in_ext='laz', buffer_mode='NONE', tile_buffer=0, verbose=False):
     if verbose:
         print('lasground_new: finding ground points')
     if buffer_mode == 'OTF':
@@ -77,9 +77,9 @@ def lasground_new(in_dir, out_dir, landscape, nr_cores, in_ext='laz', buffer_mod
     else:
         buffer_cmd = ''
     cmd = 'lasground_new -i %s\*.%s ' \
-          '%s %s -extra_fine -spike_down %d ' \
-          '-olaz -odir %s -odix _ground -cores %d' \
-          % (in_dir, in_ext, buffer_cmd, landscape, spike_down, out_dir, nr_cores)
+          '%s %s -extra_fine ' \
+          '-olaz -odir %s -odix _ground -cores %d ' \
+          % (in_dir, in_ext, buffer_cmd, landscape, out_dir, nr_cores)
     os.system(cmd)
 
 ## Remove low and high outliers that are often just noise (e.g. clouds or birds)
@@ -122,7 +122,7 @@ def lasclassify(in_dir, out_dir, nr_cores, in_ext='laz', buffer_mode='NONE', ver
     else:
         buffer_cmd = ''
     cmd = 'lasclassify -i %s\*.%s ' \
-          '%s -olaz -odir %s -odix _classif -cores %d' \
+          '%s -olaz -odir %s -odix _classif -cores %d -v' \
           % (in_dir, in_ext, buffer_cmd, out_dir, nr_cores)
     os.system(cmd)
 
@@ -211,17 +211,19 @@ def lassort(in_dir, out_dir, nr_cores, in_ext='laz', verbose=False):
     os.system(cmd)
 
 ## Compute lidar metrics over regular grids or for polygons in a shp
-def lascanopy(in_laz, in_shp, out_csv, ht_cutoff=2, metric_cmd='-p 5 10 25 50 75 90', verbose=False):
+def lascanopy(in_laz, in_shp, out_csv, ht_cutoff=2, bicentiles_upper=1, metric_cmd='-p 5 10 25 50 75 90', verbose=False):
 
     if verbose:
         print('lascanopy: computing lidar metrics')
 
+    b_upper_cmd = '-b_upper %d' % bicentiles_upper
+
     cmd = 'lascanopy -very_verbose -i %s ' \
           '-keep_class 2 3 4 5 ' \
           '-lop %s ' \
-          '-height_cutoff %.2f %s ' \
+          '-height_cutoff %.2f %s %s ' \
           '-o %s' \
-          % (in_laz, in_shp, ht_cutoff, metric_cmd, out_csv)     # -keep_random_fraction 0.00001 OR -keep_every_nth 1000
+          % (in_laz, in_shp, ht_cutoff, b_upper_cmd, metric_cmd, out_csv)     # -keep_random_fraction 0.00001 OR -keep_every_nth 1000
 
     ## Capture console output to get polygons with negative area to remove from df
     p = subprocess.Popen(cmd, universal_newlines=True, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)

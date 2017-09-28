@@ -2,7 +2,8 @@
 Project Name: BigTreesVan
 Authors: Giona Matasci (giona.matasci@gmail.com)
 File Name: MAIN_BigTrees_Vancouver.py
-Objective: Build high-res CHM from LiDAR for the city of Vancouver, detect treetops, segment crowns and extract attributes
+Objective: Build high-res CHM from LiDAR for the city of Vancouver, detect treetops, segment crowns, extract attributes,
+and build MXD project to visualize layers in ArcMap.
 """
 
 ## TO DO -------------------------------------------------------------------
@@ -96,7 +97,8 @@ if __name__ == '__main__':
     # PARAMS['dataset_name'] = '1tile_UBC_Piotr'
     # PARAMS['dataset_name'] = 'Tune_alg_1tile_QE'
 
-    PARAMS['experiment_name'] = 'step_0p3m_mindist_8'
+    PARAMS['experiment_name'] = 'step_0p3m_mindist_8_mask_5m'
+    # PARAMS['experiment_name'] = 'step_0p3m_mindist_8_WITH_HIGH_VEG_MASK'
 
     #### TODO TO LAZ and remove unzipped las
     PARAMS['data_dir'] = r'E:\BigTreesVan_data\LiDAR\CoV\Classified_LiDAR'
@@ -121,12 +123,12 @@ if __name__ == '__main__':
 
     PARAMS['DEM_type'] = 'PF_DSM'  ## las2dem parameter defining the type of DSM created
     PARAMS['freeze_dist'] = 0.8   ## las2dem spike-free CHM parameter
-    PARAMS['veg_ht_thresh'] = 3   ## height threshold to filter low vegetation and other structures from masked DSM
+    PARAMS['veg_ht_thresh'] = 5   ## height threshold to filter low vegetation (hedges, etc.) during watershed segmentation of the CHM
 
     PARAMS['subcircle'] = 0.2   ## lasgrid parameter in vegetation mask to thicken point by adding a discrete ring of 8 new points that form a circle with radius "subcircle"
 
-    PARAMS['disk_radius'] = 4  ## radius of structuring element for morphological opening() on vegetation mask: radius of 4 means a 4*2+1= 9 pixel diameter disk
-    PARAMS['min_size_holes'] = 300  ## number of contiguous 0 pixels in the vegetation mask to be filled by remove_small_holes()
+    PARAMS['disk_radius'] = 4   ## radius of structuring element for morphological opening() on vegetation mask: radius of 4 means a 4*2+1= 9 pixel diameter disk
+    PARAMS['min_size_holes'] = 300   ## number of contiguous 0 pixels in the vegetation mask to be filled by remove_small_holes()
 
     PARAMS['min_distance_peaks'] = 8   ## minimum separation in pixels between treetops in peak_local_max() and corner_peaks(), i.e. 4 pix = 4*0.5 = 2 m @ 0.5 m spatial resolution
 
@@ -134,7 +136,7 @@ if __name__ == '__main__':
 
     PARAMS['tree_ht_thresh'] = 15   ## height threshold in meters below which we remove segmented trees
 
-    PARAMS['crown_dm_thresh'] = 40  ## crown diameter threshold in meters above which the polygon is no more a tree but background instead
+    PARAMS['crown_dm_thresh'] = 40  ## crown diameter threshold in meters above which the polygon is no more a tree but instead the background to eliminate
 
     PARAMS['gr_names_keys'] = {'VegMaskRaw': 'veg_mask_raw',
                                'VegMaskFilled': 'veg_mask_filled',
@@ -163,7 +165,7 @@ if __name__ == '__main__':
     tile_laz_dir = os.path.join(PARAMS['data_dir'], 'laz')
     tile_denoised_dir = os.path.join(PARAMS['exp_dir'], 'tiles_denoised')
     tile_ht_norm_dir = os.path.join(PARAMS['exp_dir'], 'tiles_ht_norm')
-    tile_ht_norm_classif_dir = os.path.join(PARAMS['exp_dir'], 'tiles_ht_norm_classif_dir')
+    tile_ht_norm_classif_dir = os.path.join(PARAMS['exp_dir'], 'tiles_ht_norm_classif')
     tile_dem_dir = os.path.join(PARAMS['exp_dir'], 'tiles_dem')
     tile_mask_dir = os.path.join(PARAMS['exp_dir'], 'tiles_mask')
     tile_chm_treetops_dir = os.path.join(PARAMS['exp_dir'], 'tiles_chm_treetops')
@@ -190,14 +192,6 @@ if __name__ == '__main__':
         json.dump(PARAMS, fp)
 
     arcpy.env.workspace = arcgis_temp_dir  # set temporary files directory (used when calling Reclassify(), etc.), could use arcpy.env.workspace = "in_memory"
-
-
-## TO PRE-TILE A SMALL AREA MIMICKING THE BIG DATASET ------------------------------------------
-
-# ## Create an unbuffered tiling from the original data (one original tile for testing):
-# lastile(in_dir=tile_las_dir, in_ext='las', out_dir=tile_las_dir, out_ext='las', tile_size=200,
-#        tile_buffer=0, nr_cores=PARAMS['nr_cores'], verbose=True)
-
 
     if PARAMS['lidar_processing']:
 
@@ -280,6 +274,8 @@ if __name__ == '__main__':
 
             chm_raw_path = os.path.join(tile_chm_treetops_dir, tile_name + '_' + PARAMS['gr_names_keys']['CHMtreeTops'] + '.asc')
 
+## BUILD CHM ----------------------------------------------------------------
+
             if PARAMS['build_CHMs']:
 
                 _, spatial_info = raster_2_array(dsm)   ## read reference spatial_info to be changed later on based on common extent
@@ -334,24 +330,32 @@ if __name__ == '__main__':
                                 arcpy.Delete_management(file)  ## ...so delete it with Arcpy
                     continue
 
-                ## Denoise vegetation mask with morphological opening and fill small holes
-                mask_open_arr = binary_opening(mask_arr, selem=disk(PARAMS['disk_radius']))
-                mask_filled_arr = remove_small_holes(mask_open_arr, min_size=PARAMS['min_size_holes']).astype(int)
+                ## Hole-filled mask of tall structures (buildings + vegetation)
+                mask_high_struct_arr = (dsm_arr > PARAMS['veg_ht_thresh']).astype(int)
+                mask_high_struct_filled_arr = remove_small_holes(mask_high_struct_arr, min_size=PARAMS['min_size_holes']).astype(int)
 
-                ## Build raw CHM (the one height values must be read from) by masking out non-vegetation DSM pixels and pixels lower than a height threshold
-                chm_raw_arr = dsm_arr * mask_filled_arr
-                chm_raw_arr[chm_raw_arr < PARAMS['veg_ht_thresh']] = 0   ## sets to 0 pixels lower than threshold and -9999 at the borders
+                ## Hole-filled all-vegetation mask, including lower vegetation like hedges
+                mask_veg_filled_arr = remove_small_holes(mask_arr, min_size=PARAMS['min_size_holes']).astype(int)
+
+                ## High vegetation mask by combining the 2 masks and denoising the result with morphological opening (to be used as boundary for the watershed segmentation)
+                mask_high_veg_arr = binary_opening(mask_veg_filled_arr * mask_high_struct_filled_arr, selem=disk(PARAMS['disk_radius'])).astype(int)
+
+                ## Build raw CHM (the one height values must be read from) by masking out non-vegetation DSM pixels with the all-vegetation mask
+                dsm_arr[dsm_arr < 0] = 0    ## sets to 0 pixels with -9999 values at the borders as well as pixels that have values slightly below 0
+                mask_veg_filled_opened_arr = binary_opening(mask_veg_filled_arr, selem=disk(PARAMS['disk_radius'])).astype(int)
+                chm_raw_arr = dsm_arr * mask_veg_filled_opened_arr
 
                 if PARAMS['plot_figures']:
                     plt.figure(), plt.title('Veg. mask'), plt.imshow(mask_arr), plt.colorbar()
-                    plt.figure(), plt.title('Veg. mask opened'), plt.imshow(mask_open_arr), plt.colorbar()
-                    plt.figure(), plt.title('Veg. mask filled'), plt.imshow(mask_filled_arr), plt.colorbar()
+                    plt.figure(), plt.title('mask_high_struct_filled_arr'), plt.imshow(mask_high_struct_filled_arr), plt.colorbar()
+                    plt.figure(), plt.title('mask_veg_filled_arr'), plt.imshow(mask_veg_filled_arr), plt.colorbar()
+                    plt.figure(), plt.title('mask_high_veg_arr'), plt.imshow(mask_high_veg_arr), plt.colorbar()
                     plt.figure(), plt.title('CHM raw'), plt.imshow(chm_raw_arr), plt.colorbar()
 
                 if PARAMS['write_files']:
                     chm_raw = array_2_raster(chm_raw_arr, spatial_info)
                     arcpy.RasterToASCII_conversion(chm_raw, chm_raw_path)
-                    mask_filled_towrite_arr = np.copy(mask_filled_arr)
+                    mask_filled_towrite_arr = np.copy(mask_veg_filled_opened_arr)
                     mask_filled_towrite_arr[mask_filled_towrite_arr == 0] = -9999
                     mask_filled_towrite = array_2_raster(mask_filled_towrite_arr, spatial_info)
                     arcpy.RasterToASCII_conversion(mask_filled_towrite, os.path.join(tile_mask_dir, tile_name + '_' + PARAMS['gr_names_keys']['VegMaskFilled'] + '.asc'))
@@ -362,7 +366,7 @@ if __name__ == '__main__':
                     chm_raw = arcpy.Raster(chm_raw_path)
                     chm_raw_arr, spatial_info = raster_2_array(chm_raw)
 
-            #### TREETOP DETECTION -------------------------------------------------------------------
+## TREETOP DETECTION -------------------------------------------------------------------
 
             if PARAMS['segment_crowns']:
 
@@ -393,6 +397,8 @@ if __name__ == '__main__':
                     local_max_visual = array_2_raster(dilation(local_max_arr, selem=disk(2)).astype(int), spatial_info)
                     arcpy.RasterToASCII_conversion(local_max_visual, os.path.join(tile_chm_treetops_dir, tile_name+'_' + PARAMS['gr_names_keys']['TreeTop'] + '.asc'))
 
+## SEGMENT CHM --------------------------------------------------------------------------
+
                 ## Prepare smoothed CHM and markers with unique labels
                 chm_mean_arr_int = chm_mean_arr.astype(np.uint16)  ## recast as integer: the input to watershed() has to be an int image
                 markers_arr = local_max_arr.astype(int)
@@ -400,11 +406,12 @@ if __name__ == '__main__':
                 markers_dilat_arr = dilation(markers_arr, selem=disk(1))  ## thicken markers with a disk to avoid problems if local max is at the edge
 
                 ## Watershed segmentation on negative CHM for smooth and compact segments (on gradient gives crappy elongated polygons and small isolated circles on treetop)
-                segments_arr = watershed(image=-chm_mean_arr_int, markers=markers_dilat_arr, mask=mask_filled_arr, compactness=PARAMS['compactness'])  ## use vegetation mask as mask to avoid boundaries being drawn beyond vegetation limits
+                segments_arr = watershed(image=-chm_mean_arr_int, markers=markers_dilat_arr, mask=mask_high_veg_arr, compactness=PARAMS['compactness'])  ## use high-vegetation mask to avoid boundaries being drawn beyond the limits of tall trees (onto hedges, smaller trees below, etc.)
 
                 if PARAMS['plot_figures']:
                     plt.figure(), plt.title('CHM mean'), plt.imshow(chm_mean_arr_int), plt.colorbar()
-                    plt.figure(), plt.title('Markers'), plt.imshow(dilation(markers_arr), cmap='prism'), plt.colorbar()
+                    plt.figure(), plt.title('Markers'), plt.imshow(markers_dilat_arr, cmap='prism'), plt.colorbar()
+                    plt.figure(), plt.title('Mask'), plt.imshow(mask_high_veg_arr, cmap='prism'), plt.colorbar()
                     plt.figure(), plt.title('Segments'), plt.imshow(segments_arr, cmap='prism'), plt.colorbar()
 
                 ## Convert raster segments to shp
@@ -421,6 +428,8 @@ if __name__ == '__main__':
 
                 ## Assign projection
                 arcpy.DefineProjection_management(segments_shp_path, arcpy.SpatialReference("NAD 1983 UTM Zone 10N"))
+
+## EXTRACT ATTRIBUTES --------------------------------------------------------------------------
 
                 ## Compute area for each tree crown
                 arcpy.AddField_management(segments_shp_path, "Shape_area", "DOUBLE")
@@ -479,7 +488,7 @@ if __name__ == '__main__':
                 arcpy.DeleteFeatures_management("seg_lyr")
 
 
-#### LOAD LAYERS INTO MXD PROJECT -------------------------------------------------------------------
+## LOAD LAYERS INTO MXD PROJECT -------------------------------------------------------------------
 
     if PARAMS['build_MXD']:
 

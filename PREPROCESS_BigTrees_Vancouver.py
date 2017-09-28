@@ -1,8 +1,10 @@
 """
 Project Name: BigTreesVan
 Authors: Giona Matasci (giona.matasci@gmail.com)
-File Name: preprocess_GT_merge_shps.py
-Objective: Merges shps (City of Vancouver and Ira's datasets), remove duplicate Tree_ID creating unique values and attach tentative height values from DSM
+File Name: PREPROCESS_BigTrees_Vancouver.py
+Objective: Merge shps (City of Vancouver and Ira Sutherland's datasets), assign a Tree_ID to the trees missing it,
+remove duplicate Tree_IDs creating unique values, attach tentative height values from CHM and fill reference_trees
+attribute table with field collected data.
 """
 
 
@@ -29,8 +31,8 @@ if __name__ == '__main__':
 
     PARAMS = {}
 
-    PARAMS['merge_clean_data'] = False   ## main switch to be set to False not to rerun the merge of initial shapefiles and duplicate ID removal (risk of messing up tree IDs used in the field)
-    PARAMS['attach_field_data'] = True    ## switch to join the xls table with field data measurements
+    PARAMS['merge_clean_data'] = True   ## main switch to be set to False not to rerun the merge of initial shapefiles and duplicate ID removal (risk of messing up tree IDs used in the field)
+    PARAMS['attach_field_data'] = False    ## switch to join the xls table with field data measurements
 
     PARAMS['measures_fieldnames'] = ['avg_ht', 'cr_diam', 'ht_liv_cr', 'NOTES']
 
@@ -40,15 +42,14 @@ if __name__ == '__main__':
 
     PARAMS['base_dir'] = r'D:\Research\ANALYSES\BigTreesVan'
 
-    PARAMS['dataset_name'] = '500m_tiles_full'
-    PARAMS['experiment_name'] = '0p3m_PF_CHM'
+    PARAMS['dataset_name'] = 'Vancouver_500m_tiles'
+    PARAMS['experiment_name'] = 'step_0p3m_mindist_8'
 
     PARAMS['wkg_dir'] = os.path.join(PARAMS['base_dir'], 'wkg')
     PARAMS['exp_dir'] = os.path.join(PARAMS['wkg_dir'], PARAMS['dataset_name'], PARAMS['experiment_name'])
 
     PARAMS['Ira_tree_ID_start'] = 26681   ## set as the number after the largest Tree ID in City of Vancouver park database
 
-    PARAMS['nr_trees_to_sample'] = 130   ## number of trees to sample
     PARAMS['ht_thresh_to_sample'] = 30    ## height threshold above which to sample trees
     PARAMS['parks_to_sample'] = ['Queen Elizabeth Park', 'Musqueam Park', 'Locarno Park', 'Memorial West Park']  ## set as the number after the largest Tree ID in City of Vancouver park database
 
@@ -103,8 +104,8 @@ if __name__ == '__main__':
         print('Extracting approximate height from rasters')
 
         ## List file paths of all tiles
-        tile_final_dir = os.path.join(PARAMS['exp_dir'], 'tiles_final')
-        file_key = os.path.join(tile_final_dir, '*_chm_raw.asc')
+        tile_chm_treetops_dir = os.path.join(PARAMS['exp_dir'], 'tiles_chm_treetops')
+        file_key = os.path.join(tile_chm_treetops_dir, '*_chm_raw.asc')
         chm_paths = glob.glob(file_key)
 
         temp_shp = PARAMS['ref_trees_path'].replace('reference_trees', 'temp_reference_trees')

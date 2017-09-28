@@ -51,6 +51,21 @@ def python_info():
     return 'Python %d-bit, version %s' % (nr_bit, sys.version)
 
 def raster_2_array(raster_obj):
+    """
+    Convert an arcpy raster object into a numpy array
+
+    Parameters
+    ----------
+    raster_obj: raster object
+        Arcpy raster object to convert
+
+    Returns
+    -------
+    raster_arr: numpy array
+        Array with raster values
+    spatial_info: dictionary
+        Dictionary with the spatial metadata needed to georeference an array as a raster
+    """
     dsc = arcpy.Describe(raster_obj)
     sr = dsc.SpatialReference
     ll = arcpy.Point(dsc.Extent.XMin, dsc.Extent.YMin) # store lower left corner to ensure the saved raster is put the right place
@@ -63,12 +78,45 @@ def raster_2_array(raster_obj):
     return raster_arr, spatial_info
 
 def array_2_raster(raster_arr, spatial_info):
+    """
+    Convert a numpy array into an arcpy raster object
+
+    Parameters
+    -------
+    raster_arr: numpy array
+        Array with raster values
+    spatial_info: dictionary
+        Dictionary with the spatial metadata needed to georeference an array as a raster
+
+    Returns
+    -------
+    raster_obj: raster object
+        Converted arcpy raster object
+    """
     raster_obj = arcpy.NumPyArrayToRaster(raster_arr, spatial_info['lower_left'],
                                           spatial_info['cell_width'], spatial_info['cell_height'])
     arcpy.DefineProjection_management(raster_obj, spatial_info['spatial_reference'])
     return raster_obj
 
 def group_arcmap_layers(mxd_in, df_in, empty_gr_lyr_path, grouping_dict):
+    """
+    Group ArcMap layers
+
+    Parameters
+    -------
+    mxd_in: string
+        Path to existing MXD
+    df_in: string
+        Name of dataframe in MXD
+    empty_gr_lyr_path: string
+        Path to empty group layer file .lyr
+    grouping_dict: dictionary
+        Dictionary with pairs of group name and corresponding file key (for glob.glob()) of the layers to group together
+
+    Returns
+    -------
+    message: string
+    """
     i = 0
     for name, srckey_placement_list in grouping_dict.items():
         srckey = srckey_placement_list[0]
